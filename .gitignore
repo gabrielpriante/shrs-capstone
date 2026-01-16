@@ -47,3 +47,19 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Data files (raw data should not be tracked)
+data/raw/*
+!data/raw/.gitkeep
+
+# Large output files
+*.pdf
+*.png
+*.jpg
+*.jpeg
+output/*.html
+output/*.tex
+
+# OS files
+.DS_Store
+Thumbs.db
