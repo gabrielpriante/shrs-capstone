@@ -4,41 +4,36 @@
 # This script demonstrates exploratory analysis and trend visualization
 # for the SHRS Program Health evaluation
 #
-# IMPORTANT: This script expects cleaned data from external sources
-# Configure paths in scripts/config/data_paths.R
+# Supports two modes:
+#   1. External data: Reads from secure locations via scripts/config/data_paths.R
+#   2. Mock data: Uses cleaned data from previous script or generates new mock data
 #
-# Input: Cleaned data from external location (via data_paths.R)
+# Input: Cleaned data from external location OR mock data OR global environment
 # Output: output/figures/ and output/tables/ (illustrative templates)
 # Last Updated: January 2026
 # ==============================================================================
 
-# Load required packages
+# ==============================================================================
+# REQUIRED PACKAGES
+# ==============================================================================
 library(tidyverse)   # Includes ggplot2, dplyr, tidyr, readr, etc.
 library(here)
 library(fixest)      # For fixed-effects estimation
 library(modelsummary) # For regression tables
+library(gt)          # For table formatting
 
 # Set seed for reproducibility
 set.seed(123)
 
 # ==============================================================================
-# LOAD EXTERNAL DATA CONFIGURATION
+# LOAD DATA PATHS CONFIGURATION
 # ==============================================================================
 
-config_file <- here("scripts", "config", "data_paths.R")
+# Load the data paths loader
+source(here("scripts", "config", "load_data_paths.R"))
 
-if (file.exists(config_file)) {
-  source(config_file)
-  message("Loaded data paths from configuration file")
-} else {
-  warning(
-    "Data configuration file not found: scripts/config/data_paths.R\n",
-    "Using placeholder data for demonstration.\n",
-    "See README.md for data configuration instructions."
-  )
-  # Set placeholder flag
-  USE_PLACEHOLDER_DATA <- TRUE
-}
+# Load paths (will return mock mode flag if SHRS_USE_MOCK_DATA=1)
+paths <- load_data_paths()
 
 # ==============================================================================
 # 1. LOAD PROCESSED DATA
@@ -46,41 +41,71 @@ if (file.exists(config_file)) {
 
 message("Loading processed data...")
 
-# PLACEHOLDER: Load from external location configured in data_paths.R
-# Example:
-# analysis_data <- readRDS(file.path(PROCESSED_DATA_PATH, "cleaned_enrollment.rds"))
-
-# For demonstration: create placeholder data structure
-# REMOVE THIS when working with actual data
-if (exists("USE_PLACEHOLDER_DATA") && USE_PLACEHOLDER_DATA) {
-  message("  NOTE: Using placeholder data for demonstration")
+if (paths$use_mock) {
+  # MOCK MODE: Check if data was created by previous script
+  if (exists("cleaned_enrollment_data")) {
+    message("  Using cleaned data from previous script (global environment)")
+    analysis_data <- cleaned_enrollment_data
+  } else {
+    message("  Generating new mock data...")
+    source(here("scripts", "utils", "mock_data.R"))
+    mock_data <- generate_mock_program_health_data()
+    analysis_data <- mock_data$enrollment
+  }
   
-  analysis_data <- tibble(
-    academic_year = rep(2018:2023, each = 7),
-    program_code = rep(c("SLP", "AuD", "CSD_UG", "AT", "DN", "SS", "SMN_UG"), 6),
-    enrolled = sample(10:80, 42, replace = TRUE),
-    revenue_per_student = sample(15000:45000, 42, replace = TRUE),
-    program_category = case_when(
-      program_code %in% c("SLP", "AuD", "CSD_UG") ~ "Communication Science & Disorders",
-      program_code %in% c("AT", "DN", "SS", "SMN_UG") ~ "Sports Medicine & Nutrition",
-      TRUE ~ "Other"
-    )
-  ) %>%
-    mutate(
-      total_revenue = enrolled * revenue_per_student,
-      enrollment_growth = (enrolled - lag(enrolled, default = enrolled[1])) / lag(enrolled, default = enrolled[1])
-    )
+} else {
+  # EXTERNAL DATA MODE: Read from external location
+  message("  Loading from external processed data location...")
+  
+  if (!is.null(paths$PROCESSED_DATA_PATH)) {
+    cleaned_file <- file.path(paths$PROCESSED_DATA_PATH, "cleaned_enrollment.rds")
+    
+    if (file.exists(cleaned_file)) {
+      analysis_data <- readRDS(cleaned_file)
+      message("  ✓ Loaded cleaned enrollment data")
+    } else {
+      stop("Cleaned data file not found: ", cleaned_file, 
+           "\nRun scripts/01_data_cleaning.R first")
+    }
+  } else {
+    stop("PROCESSED_DATA_PATH not configured in data_paths.R")
+  }
 }
 
 message("  - Analysis sample: ", nrow(analysis_data), " observations")
-message("  - Programs: ", paste(unique(analysis_data$program_code), collapse = ", "))
-message("  - Years: ", min(analysis_data$academic_year), " to ", max(analysis_data$academic_year))
+if ("program_code" %in% names(analysis_data)) {
+  message("  - Programs: ", paste(unique(analysis_data$program_code), collapse = ", "))
+}
+if ("academic_year" %in% names(analysis_data)) {
+  message("  - Years: ", min(analysis_data$academic_year), " to ", max(analysis_data$academic_year))
+}
 
 # ==============================================================================
 # 2. DESCRIPTIVE STATISTICS
 # ==============================================================================
 
 message("\nGenerating descriptive statistics...")
+
+# Ensure required columns exist and calculate total_revenue if needed
+if (!"total_revenue" %in% names(analysis_data) && "tuition_revenue" %in% names(analysis_data)) {
+  analysis_data <- analysis_data %>%
+    mutate(total_revenue = tuition_revenue)
+} else if (!"total_revenue" %in% names(analysis_data)) {
+  analysis_data <- analysis_data %>%
+    mutate(total_revenue = enrolled * revenue_per_student)
+}
+
+# Ensure program_category exists
+if (!"program_category" %in% names(analysis_data) && "program_code" %in% names(analysis_data)) {
+  analysis_data <- analysis_data %>%
+    mutate(
+      program_category = case_when(
+        program_code %in% c("SLP", "AuD", "CSD_UG") ~ "Communication Science & Disorders",
+        program_code %in% c("AT", "DN", "SS", "SMN_UG") ~ "Sports Medicine & Nutrition",
+        TRUE ~ "Other"
+      )
+    )
+}
 
 # Summary statistics by program category
 desc_stats <- analysis_data %>%
@@ -236,5 +261,12 @@ message("\n=== Exploratory analysis complete! ===")
 message("Key outputs:")
 message("  - Figures: output/figures/enrollment_trends.png, revenue_per_student.png")
 message("  - Tables: output/tables/program_summary.csv, program_summary.html")
-message("\nREMINDER: These outputs are illustrative templates, not final decisions")
+
+if (paths$use_mock) {
+  message("\nREMINDER: Using mock data for demonstration purposes")
+  message("To analyze real data: configure scripts/config/data_paths.R")
+} else {
+  message("\nREMINDER: These outputs are illustrative templates, not final decisions")
+}
+
 message("Next steps: Develop financial analysis and scenario planning scripts")

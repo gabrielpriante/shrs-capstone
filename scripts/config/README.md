@@ -2,104 +2,130 @@
 
 ## Purpose
 
-This directory is for **local configuration files** that define paths to external data sources. These configuration files are **NOT tracked in Git** for security and privacy reasons.
+This directory contains configuration files for accessing external data sources. These files are **NOT tracked in Git** for security and privacy.
 
-## Required Configuration File
+## Files
 
-Create a file named `data_paths.R` in this directory with the following structure:
+- **`data_paths.example.R`** (TRACKED): Template showing required configuration structure
+- **`data_paths.R`** (NOT TRACKED): Your local configuration with actual data paths
+- **`load_data_paths.R`** (TRACKED): Shared loader function used by all scripts
 
+## Quick Start
+
+### Option A: Use External Secure Data
+
+1. **Copy the example configuration:**
+   ```bash
+   cp scripts/config/data_paths.example.R scripts/config/data_paths.R
+   ```
+   Or manually copy and rename the file in your file browser
+
+2. **Edit `data_paths.R`** with your actual secure data paths:
+   ```r
+   DATA_ROOT <- "/your/actual/secure/path/SHRS_Analysis"
+   # Update all file paths to match your data location
+   ```
+
+3. **Run analysis scripts normally** - they will automatically use your configuration
+
+### Option B: Run with Mock Data (Testing/Demonstration)
+
+**In R:**
 ```r
-# ==============================================================================
-# Data Paths Configuration
-# ==============================================================================
-# This file defines paths to external data sources for the SHRS Program Health
-# analysis. This file should NOT be committed to Git.
-#
-# IMPORTANT: All data must be stored in secure, external locations that comply
-# with institutional data governance policies and FERPA requirements.
-# ==============================================================================
-
-# Root directory for all SHRS analysis data
-# Customize this to point to your secure data storage location
-DATA_ROOT <- "C:/SecureData/SHRS_Analysis"  # Windows example
-# DATA_ROOT <- "/secure/data/SHRS_Analysis"  # Unix/Mac example
-# DATA_ROOT <- "\\\\network\\share\\SHRS_Analysis"  # Network drive example
-
-# Data subdirectories
-RAW_DATA_PATH <- file.path(DATA_ROOT, "raw")
-PROCESSED_DATA_PATH <- file.path(DATA_ROOT, "processed")
-ARCHIVE_PATH <- file.path(DATA_ROOT, "archive")
-
-# Specific data file paths
-# Enrollment data
-ENROLLMENT_DATA <- file.path(RAW_DATA_PATH, "enrollment_data.csv")
-
-# Financial data
-FINANCIAL_DATA <- file.path(RAW_DATA_PATH, "financial_data.xlsx")
-
-# Student outcomes data
-STUDENT_OUTCOMES_DATA <- file.path(RAW_DATA_PATH, "student_outcomes.csv")
-
-# Faculty and resources data
-FACULTY_DATA <- file.path(RAW_DATA_PATH, "faculty_data.csv")
-
-# Admissions funnel data
-ADMISSIONS_DATA <- file.path(RAW_DATA_PATH, "admissions_data.csv")
-
-# Licensure exam data
-LICENSURE_DATA <- file.path(RAW_DATA_PATH, "licensure_exam_results.csv")
-
-# Survey data
-SURVEY_DATA <- file.path(RAW_DATA_PATH, "student_survey_data.csv")
-
-# Alumni employment data
-ALUMNI_DATA <- file.path(RAW_DATA_PATH, "alumni_employment.csv")
-
-# Add additional data source paths as needed
+Sys.setenv(SHRS_USE_MOCK_DATA = "1")
+source("scripts/01_data_cleaning.R")
 ```
 
-## Security Guidelines
+**In Bash/Terminal:**
+```bash
+export SHRS_USE_MOCK_DATA=1
+Rscript scripts/01_data_cleaning.R
+```
 
-1. **Never commit `data_paths.R` to Git** - It is already in `.gitignore`
-2. **Use secure storage locations** - Network drives, encrypted folders, or institutional secure storage
-3. **Follow institutional policies** - Comply with data governance and FERPA requirements
-4. **Restrict access** - Ensure only authorized users can access the data locations
-5. **Document data sources** - Maintain a separate (non-versioned) data dictionary
+Mock mode generates realistic simulated data for testing the analysis pipeline without requiring access to actual secure data.
 
-## Setup Instructions
+## Why is `data_paths.R` Ignored?
 
-1. Copy the template above
-2. Create `scripts/config/data_paths.R` in your local repository
-3. Customize the paths to match your secure data storage locations
-4. Verify you have appropriate permissions to access the data
-5. Test the configuration by running `source("scripts/config/data_paths.R")`
+**Security & Privacy**: `data_paths.R` contains file paths that may reveal:
+- Your computer username or directory structure
+- Network share locations
+- Institutional data storage patterns
+
+**FERPA Compliance**: Paths could indirectly identify data sources containing protected student information.
+
+**Portability**: Each user needs their own configuration matching their local or network storage setup.
+
+## How the Loader Works
+
+The `load_data_paths.R` function:
+
+1. **Checks for mock mode**: If `SHRS_USE_MOCK_DATA=1`, enables mock data
+2. **Looks for your config**: Searches for `scripts/config/data_paths.R`
+3. **Loads paths**: If found, sources the file and returns path variables
+4. **Fails helpfully**: If not found (and not mock mode), shows clear setup instructions
+
+All analysis scripts use this shared loader for consistent behavior.
+
+## What is Mock Mode For?
+
+Mock mode allows you to:
+- **Test the pipeline** without secure data access
+- **Demonstrate methods** in presentations or training
+- **Develop new analyses** before data is available
+- **Verify installation** and package dependencies
+- **Run CI/CD checks** in automated environments
+
+Mock data is deterministic (set.seed(123)) and matches the expected schema of real SHRS program health data.
+
+## Configuration Template
+
+See `data_paths.example.R` for the complete template. Key variables:
+
+- `DATA_ROOT`: Base directory for all data
+- `RAW_DATA_PATH`: Location of unprocessed institutional data
+- `PROCESSED_DATA_PATH`: Location for cleaned analytical datasets  
+- Individual file paths: `ENROLLMENT_DATA`, `FINANCIAL_DATA`, etc.
 
 ## Verification
 
-After creating your configuration file, verify it works:
+After creating your `data_paths.R`, test it:
 
 ```r
-# In R console:
 source("scripts/config/data_paths.R")
-
-# Check that paths are defined:
 print(DATA_ROOT)
-print(ENROLLMENT_DATA)
-
-# Verify paths exist (adjust as needed):
-dir.exists(DATA_ROOT)
-file.exists(ENROLLMENT_DATA)
+dir.exists(DATA_ROOT)          # Should return TRUE
+file.exists(ENROLLMENT_DATA)   # Should return TRUE if file exists
 ```
 
 ## Troubleshooting
 
-**Problem**: Scripts can't find the configuration file
-- **Solution**: Ensure `data_paths.R` exists in `scripts/config/` directory
+**"DATA CONFIGURATION REQUIRED" error:**
+- Create `data_paths.R` from the example, OR
+- Enable mock mode with `SHRS_USE_MOCK_DATA=1`
 
-**Problem**: Permission denied errors
-- **Solution**: Verify you have read/write access to the data directories
+**"File not found" errors:**
+- Verify paths in `data_paths.R` match actual file locations
+- Check file permissions and access rights
+- Ensure data files exist at specified paths
 
-**Problem**: File not found errors
-- **Solution**: Check that file paths in `data_paths.R` match actual file locations
+**Mock mode not working:**
+- Check environment variable: `Sys.getenv("SHRS_USE_MOCK_DATA")`
+- Must be exactly "1" (as string)
+- Set before loading: `Sys.setenv(SHRS_USE_MOCK_DATA = "1")`
 
-For additional help, see the main README.md or contact your data steward.
+## Important Reminders
+
+✅ **DO**: Copy `data_paths.example.R` to create your local `data_paths.R`  
+✅ **DO**: Keep data in secure, external locations outside the repository  
+✅ **DO**: Use mock mode for testing and demonstration  
+✅ **DO**: Follow institutional data governance policies
+
+❌ **DON'T**: Commit `data_paths.R` to Git (it's in `.gitignore`)  
+❌ **DON'T**: Put actual data files in the repository  
+❌ **DON'T**: Share your `data_paths.R` file (it's environment-specific)  
+❌ **DON'T**: Use paths that identify real institutions in committed files
+
+For more information:
+- Main README: Project overview and FERPA considerations
+- `docs/quick_start.md`: Step-by-step setup guide
+- `docs/reproducible_workflow.md`: Detailed best practices
