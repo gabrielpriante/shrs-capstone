@@ -8,11 +8,10 @@
 # ==============================================================================
 
 # Load required packages
-library(tidyverse)
+library(tidyverse)   # Includes ggplot2, dplyr, tidyr, readr, etc.
 library(here)
 library(fixest)      # For fixed-effects estimation
 library(modelsummary) # For regression tables
-library(ggplot2)
 
 # Set seed for reproducibility
 set.seed(123)
