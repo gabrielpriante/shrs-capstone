@@ -39,11 +39,28 @@ vignettes/*.pdf
 # R Environment Variables
 .Renviron
 
-# pkgdown site
-docs/
+# pkgdown site (exclude pkgdown-generated sites but allow our docs/ folder)
+_site/
+site_libs/
 
 # translation temp files
 po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Data files (raw data should not be tracked)
+data/raw/*
+!data/raw/.gitkeep
+
+# Large output files
+*.pdf
+*.png
+*.jpg
+*.jpeg
+output/*.html
+output/*.tex
+
+# OS files
+.DS_Store
+Thumbs.db
