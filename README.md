@@ -101,10 +101,11 @@ The analysis follows a numbered workflow for reproducibility:
 
 1. **`scripts/00_setup.R`** - Install and load required packages
 2. **`scripts/01_data_cleaning.R`** - Import and clean raw data
-3. **`scripts/02_data_processing.R`** - Create analysis variables
-4. **`analysis/01_exploratory_analysis.R`** - Descriptive statistics and EDA
-5. **`analysis/02_main_analysis.R`** - Primary econometric analysis
-6. **`analysis/03_robustness_checks.R`** - Sensitivity analysis
+3. **`analysis/01_exploratory_analysis.R`** - Exploratory analysis, descriptive statistics, and main econometric analysis
+
+Additional scripts can be added as needed:
+- `scripts/02_data_processing.R` - Create analysis variables (if needed)
+- `analysis/02_robustness_checks.R` - Sensitivity analysis (if needed)
 
 All scripts should be run in order. Processed data and outputs will be saved to their respective folders.
 

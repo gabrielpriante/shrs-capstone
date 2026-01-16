@@ -142,4 +142,4 @@ message("  ✓ Saved as CSV: data/processed/cleaned_data.csv")
 # ==============================================================================
 
 message("\n=== Data cleaning complete! ===")
-message("Next step: Run scripts/02_data_processing.R")
+message("Next step: Run analysis/01_exploratory_analysis.R")
