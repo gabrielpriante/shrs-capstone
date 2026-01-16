@@ -1,29 +1,84 @@
 # ==============================================================================
-# Main Analysis Script
+# Exploratory Analysis Script - SHRS Program Health Analysis
 # ==============================================================================
-# This script performs the primary econometric analysis
-# Input: data/processed/cleaned_data.rds
-# Output: output/regression_results.txt, output/figures/
+# This script demonstrates exploratory analysis and trend visualization
+# for the SHRS Program Health evaluation
+#
+# Supports two modes:
+#   1. External data: Reads from secure locations via scripts/config/data_paths.R
+#   2. Mock data: Uses cleaned data from previous script or generates new mock data
+#
+# Input: Cleaned data from external location OR mock data OR global environment
+# Output: output/figures/ and output/tables/ (illustrative templates)
 # Last Updated: January 2026
 # ==============================================================================
 
-# Load required packages
+# ==============================================================================
+# REQUIRED PACKAGES
+# ==============================================================================
 library(tidyverse)   # Includes ggplot2, dplyr, tidyr, readr, etc.
 library(here)
 library(fixest)      # For fixed-effects estimation
 library(modelsummary) # For regression tables
+library(gt)          # For table formatting
 
 # Set seed for reproducibility
 set.seed(123)
+
+# ==============================================================================
+# LOAD DATA PATHS CONFIGURATION
+# ==============================================================================
+
+# Load the data paths loader
+source(here("scripts", "config", "load_data_paths.R"))
+
+# Load paths (will return mock mode flag if SHRS_USE_MOCK_DATA=1)
+paths <- load_data_paths()
 
 # ==============================================================================
 # 1. LOAD PROCESSED DATA
 # ==============================================================================
 
 message("Loading processed data...")
-analysis_data <- readRDS(here("data", "processed", "cleaned_data.rds"))
+
+if (paths$use_mock) {
+  # MOCK MODE: Check if data was created by previous script
+  if (exists("cleaned_enrollment_data")) {
+    message("  Using cleaned data from previous script (global environment)")
+    analysis_data <- cleaned_enrollment_data
+  } else {
+    message("  Generating new mock data...")
+    source(here("scripts", "utils", "mock_data.R"))
+    mock_data <- generate_mock_program_health_data()
+    analysis_data <- mock_data$enrollment
+  }
+  
+} else {
+  # EXTERNAL DATA MODE: Read from external location
+  message("  Loading from external processed data location...")
+  
+  if (!is.null(paths$PROCESSED_DATA_PATH)) {
+    cleaned_file <- file.path(paths$PROCESSED_DATA_PATH, "cleaned_enrollment.rds")
+    
+    if (file.exists(cleaned_file)) {
+      analysis_data <- readRDS(cleaned_file)
+      message("  ✓ Loaded cleaned enrollment data")
+    } else {
+      stop("Cleaned data file not found: ", cleaned_file, 
+           "\nRun scripts/01_data_cleaning.R first")
+    }
+  } else {
+    stop("PROCESSED_DATA_PATH not configured in data_paths.R")
+  }
+}
 
 message("  - Analysis sample: ", nrow(analysis_data), " observations")
+if ("program_code" %in% names(analysis_data)) {
+  message("  - Programs: ", paste(unique(analysis_data$program_code), collapse = ", "))
+}
+if ("academic_year" %in% names(analysis_data)) {
+  message("  - Years: ", min(analysis_data$academic_year), " to ", max(analysis_data$academic_year))
+}
 
 # ==============================================================================
 # 2. DESCRIPTIVE STATISTICS
@@ -31,69 +86,99 @@ message("  - Analysis sample: ", nrow(analysis_data), " observations")
 
 message("\nGenerating descriptive statistics...")
 
-# Summary statistics table
-desc_stats <- analysis_data %>%
-  select(outcome, covariate1, treatment) %>%
-  summarise(
-    across(
-      everything(),
-      list(
-        Mean = ~mean(., na.rm = TRUE),
-        SD = ~sd(., na.rm = TRUE),
-        Min = ~min(., na.rm = TRUE),
-        Max = ~max(., na.rm = TRUE),
-        N = ~sum(!is.na(.))
-      ),
-      .names = "{.col}_{.fn}"
+# Ensure required columns exist and calculate total_revenue if needed
+if (!"total_revenue" %in% names(analysis_data) && "tuition_revenue" %in% names(analysis_data)) {
+  analysis_data <- analysis_data %>%
+    mutate(total_revenue = tuition_revenue)
+} else if (!"total_revenue" %in% names(analysis_data)) {
+  analysis_data <- analysis_data %>%
+    mutate(total_revenue = enrolled * revenue_per_student)
+}
+
+# Ensure program_category exists
+if (!"program_category" %in% names(analysis_data) && "program_code" %in% names(analysis_data)) {
+  analysis_data <- analysis_data %>%
+    mutate(
+      program_category = case_when(
+        program_code %in% c("SLP", "AuD", "CSD_UG") ~ "Communication Science & Disorders",
+        program_code %in% c("AT", "DN", "SS", "SMN_UG") ~ "Sports Medicine & Nutrition",
+        TRUE ~ "Other"
+      )
     )
+}
+
+# Summary statistics by program category
+desc_stats <- analysis_data %>%
+  group_by(program_category) %>%
+  summarise(
+    n_programs = n_distinct(program_code),
+    avg_enrollment = mean(enrolled, na.rm = TRUE),
+    sd_enrollment = sd(enrolled, na.rm = TRUE),
+    avg_revenue_per_student = mean(revenue_per_student, na.rm = TRUE),
+    total_revenue_sum = sum(total_revenue, na.rm = TRUE),
+    .groups = "drop"
   )
 
 print(desc_stats)
 
 # ==============================================================================
-# 3. VISUALIZATION
+# 3. VISUALIZATION - ENROLLMENT TRENDS
 # ==============================================================================
 
 message("\nCreating visualizations...")
 
-# Create output/figures directory if it doesn't exist
+# Create output directories if they don't exist
 dir.create(here("output", "figures"), recursive = TRUE, showWarnings = FALSE)
+dir.create(here("output", "tables"), recursive = TRUE, showWarnings = FALSE)
 
-# Plot 1: Distribution of outcome variable
-p1 <- ggplot(analysis_data, aes(x = outcome)) +
-  geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
+# Plot 1: Enrollment trends by program
+p1 <- ggplot(analysis_data, aes(x = academic_year, y = enrolled, color = program_code)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~program_category, ncol = 1, scales = "free_y") +
   theme_minimal() +
+  theme(legend.position = "bottom") +
   labs(
-    title = "Distribution of Outcome Variable",
-    x = "Outcome",
-    y = "Frequency"
-  )
+    title = "Enrollment Trends by Program (2018-2023)",
+    subtitle = "SHRS Program Health Analysis - Illustrative Template",
+    x = "Academic Year",
+    y = "Enrolled Students",
+    color = "Program",
+    caption = "Note: This is an illustrative template using placeholder data"
+  ) +
+  scale_color_brewer(palette = "Set2")
 
 ggsave(
-  here("output", "figures", "outcome_distribution.png"),
+  here("output", "figures", "enrollment_trends.png"),
   plot = p1,
-  width = 8,
-  height = 6,
+  width = 10,
+  height = 8,
   dpi = 300
 )
 
-# Plot 2: Outcome by treatment status
-p2 <- ggplot(analysis_data, aes(x = treatment_status, y = outcome, fill = treatment_status)) +
+# Plot 2: Revenue per student by program
+p2 <- ggplot(analysis_data, aes(x = program_code, y = revenue_per_student, fill = program_category)) +
   geom_boxplot(alpha = 0.7) +
   theme_minimal() +
-  scale_fill_manual(values = c("Control" = "grey70", "Treatment" = "steelblue")) +
-  labs(
-    title = "Outcome by Treatment Status",
-    x = "Treatment Status",
-    y = "Outcome",
-    fill = "Group"
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "top"
   ) +
-  theme(legend.position = "none")
+  labs(
+    title = "Revenue per Student Distribution by Program",
+    subtitle = "SHRS Program Health Analysis - Illustrative Template",
+    x = "Program Code",
+    y = "Revenue per Student ($)",
+    fill = "Program Category",
+    caption = "Note: This is an illustrative template using placeholder data"
+  ) +
+  scale_fill_brewer(palette = "Set1") +
+  scale_y_continuous(labels = scales::dollar_format())
 
 ggsave(
-  here("output", "figures", "outcome_by_treatment.png"),
+  here("output", "figures", "revenue_per_student.png"),
   plot = p2,
-  width = 8,
+  width = 10,
   height = 6,
   dpi = 300
 )
@@ -101,100 +186,87 @@ ggsave(
 message("  ✓ Figures saved to output/figures/")
 
 # ==============================================================================
-# 4. REGRESSION ANALYSIS
+# 4. TREND ANALYSIS
 # ==============================================================================
 
-message("\nRunning regression analysis...")
+message("\nPerforming trend analysis...")
 
-# Model 1: Simple regression (treatment effect only)
-model1 <- feols(outcome ~ treatment, data = analysis_data)
+# Calculate year-over-year growth rates by program
+growth_analysis <- analysis_data %>%
+  group_by(program_code) %>%
+  arrange(academic_year) %>%
+  mutate(
+    enrollment_yoy_change = enrolled - lag(enrolled),
+    enrollment_yoy_pct = (enrolled - lag(enrolled)) / lag(enrolled) * 100
+  ) %>%
+  summarise(
+    avg_annual_growth_pct = mean(enrollment_yoy_pct, na.rm = TRUE),
+    total_enrollment_change = last(enrolled) - first(enrolled),
+    .groups = "drop"
+  )
 
-# Model 2: Add control variables
-model2 <- feols(outcome ~ treatment + covariate1, data = analysis_data)
-
-# Model 3: Add year fixed effects
-model3 <- feols(outcome ~ treatment + covariate1 | year, data = analysis_data)
-
-# Model 4: Interaction term
-model4 <- feols(outcome ~ treatment * covariate1 | year, data = analysis_data)
-
-# Display results
-print(summary(model1))
-print(summary(model2))
-print(summary(model3))
-print(summary(model4))
+print("Average Annual Enrollment Growth by Program:")
+print(growth_analysis)
 
 # ==============================================================================
-# 5. CREATE REGRESSION TABLE
+# 5. CREATE SUMMARY TABLE
 # ==============================================================================
 
-message("\nCreating regression table...")
+message("\nCreating summary tables...")
 
-# Create directory for tables
-dir.create(here("output", "tables"), recursive = TRUE, showWarnings = FALSE)
+# Program summary table
+program_summary <- analysis_data %>%
+  group_by(program_category, program_code) %>%
+  summarise(
+    years_observed = n_distinct(academic_year),
+    avg_enrollment = round(mean(enrolled, na.rm = TRUE), 1),
+    total_revenue_6yr = sum(total_revenue, na.rm = TRUE),
+    avg_revenue_per_student = round(mean(revenue_per_student, na.rm = TRUE), 0),
+    .groups = "drop"
+  ) %>%
+  arrange(program_category, program_code)
 
-# Generate regression table
-modelsummary(
-  list(
-    "(1)" = model1,
-    "(2)" = model2,
-    "(3)" = model3,
-    "(4)" = model4
-  ),
-  output = here("output", "tables", "regression_results.html"),
-  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
-  gof_map = c("nobs", "r.squared", "adj.r.squared"),
-  title = "Treatment Effect on Outcome: Main Results",
-  notes = "Standard errors in parentheses. * p < 0.1, ** p < 0.05, *** p < 0.01"
-)
+# Save as CSV
+write_csv(program_summary, here("output", "tables", "program_summary.csv"))
 
-# Also save as text file
-modelsummary(
-  list(
-    "(1)" = model1,
-    "(2)" = model2,
-    "(3)" = model3,
-    "(4)" = model4
-  ),
-  output = here("output", "tables", "regression_results.txt"),
-  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01)
-)
+# Create formatted HTML table
+library(gt)
+
+program_summary %>%
+  gt() %>%
+  tab_header(
+    title = "SHRS Program Summary Statistics",
+    subtitle = "Illustrative Template - 2018-2023"
+  ) %>%
+  fmt_number(
+    columns = avg_enrollment,
+    decimals = 1
+  ) %>%
+  fmt_currency(
+    columns = c(total_revenue_6yr, avg_revenue_per_student),
+    decimals = 0
+  ) %>%
+  tab_footnote(
+    footnote = "This is an illustrative template using placeholder data"
+  ) %>%
+  gtsave(here("output", "tables", "program_summary.html"))
 
 message("  ✓ Tables saved to output/tables/")
-
-# ==============================================================================
-# 6. EXPORT KEY RESULTS
-# ==============================================================================
-
-message("\nExporting key results...")
-
-# Extract treatment effect from preferred model (model 3)
-treatment_effect <- coef(model3)["treatment"]
-se_treatment <- se(model3)["treatment"]
-
-# Create results summary
-results_summary <- tibble(
-  Model = "Treatment Effect (Year FE)",
-  Coefficient = treatment_effect,
-  SE = se_treatment,
-  `CI Lower` = treatment_effect - 1.96 * se_treatment,
-  `CI Upper` = treatment_effect + 1.96 * se_treatment,
-  N = nobs(model3)
-)
-
-print(results_summary)
-
-# Save results summary
-saveRDS(results_summary, here("output", "results_summary.rds"))
-write_csv(results_summary, here("output", "results_summary.csv"))
 
 # ==============================================================================
 # SCRIPT COMPLETE
 # ==============================================================================
 
-message("\n=== Main analysis complete! ===")
+message("\n=== Exploratory analysis complete! ===")
 message("Key outputs:")
-message("  - Figures: output/figures/")
-message("  - Tables: output/tables/")
-message("  - Results summary: output/results_summary.csv")
-message("\nNext step: Review results and run robustness checks")
+message("  - Figures: output/figures/enrollment_trends.png, revenue_per_student.png")
+message("  - Tables: output/tables/program_summary.csv, program_summary.html")
+
+if (paths$use_mock) {
+  message("\nREMINDER: Using mock data for demonstration purposes")
+  message("To analyze real data: configure scripts/config/data_paths.R")
+} else {
+  message("\nREMINDER: These outputs are illustrative templates, not final decisions")
+}
+
+message("Next steps: Develop financial analysis and scenario planning scripts")

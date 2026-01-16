@@ -1,7 +1,8 @@
 # ==============================================================================
 # Setup Script - Package Installation and Loading
 # ==============================================================================
-# This script installs and loads all required packages for the SHRS capstone project
+# This script installs and loads all required packages for the SHRS capstone
+# project focused on Program Health Analysis
 # Run this script once when first setting up the project
 # Last Updated: January 2026
 # ==============================================================================
@@ -40,12 +41,13 @@ viz_packages <- c(
   "scales",       # Scale functions for visualization
   "gridExtra",    # Arranging multiple plots
   "patchwork",    # Combining ggplots
-  "ggthemes"      # Additional themes for ggplot2
+  "ggthemes",     # Additional themes for ggplot2
+  "plotly"        # Interactive visualizations
 )
 
 # Tables and output packages
 output_packages <- c(
-  "stargazer",    # LaTeX and HTML tables
+  "gt",           # Modern table creation
   "modelsummary", # Modern regression tables
   "knitr",        # Dynamic report generation
   "kableExtra"    # Enhanced table formatting
@@ -72,6 +74,20 @@ library(here)
 message("\n=== Session Info ===")
 print(sessionInfo())
 
+# Reminder about data configuration
+message("\n=== IMPORTANT: Data Configuration ===")
+message("This repository does not contain data files.")
+message("\nYou have two options to run analyses:")
+message("\nOPTION A: Use External Secure Data")
+message("  1. Copy scripts/config/data_paths.example.R to scripts/config/data_paths.R")
+message("  2. Edit data_paths.R with your actual secure data paths")
+message("  3. Run analysis scripts normally")
+message("\nOPTION B: Run with Mock Data (testing/demonstration)")
+message("  In R: Sys.setenv(SHRS_USE_MOCK_DATA = \"1\")")
+message("  In bash: export SHRS_USE_MOCK_DATA=1")
+message("  Then run analysis scripts")
+message("\nSee scripts/config/README.md and docs/quick_start.md for details.")
+
 message("\n=== Setup Complete ===")
 message("All required packages are installed and ready to use.")
-message("Remember to load specific packages as needed in your analysis scripts.")
+message("Configure data access (Option A or B above) before running analysis scripts.")

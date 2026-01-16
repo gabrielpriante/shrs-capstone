@@ -1,30 +1,34 @@
-# Reproducible Workflow Guide
+# Reproducible Workflow Guide - SHRS Program Health Analysis
 
 ## Overview
 
-This document provides guidelines for maintaining a reproducible workflow throughout the SHRS capstone project. Following these practices ensures that all team members can replicate results and that the analysis is transparent and verifiable.
+This document provides guidelines for maintaining a reproducible workflow throughout the SHRS capstone project. Following these practices ensures that all team members can replicate analytical methods and that the work is transparent and verifiable.
+
+**Important**: This is a **data-free repository**. All data remains in external, secure locations. Reproducibility focuses on analytical methods and workflows, not data storage.
 
 ## Project Organization Principles
 
 ### 1. Directory Structure
 
-The project follows a standardized structure:
+The project follows a standardized, data-free structure:
 
-- **`data/raw/`**: Original, unmodified data files (never edit these!)
-- **`data/processed/`**: Cleaned and processed datasets ready for analysis
-- **`scripts/`**: Data cleaning and processing scripts
-- **`analysis/`**: Analysis and modeling scripts
-- **`output/`**: All generated outputs (figures, tables, results)
-- **`docs/`**: Documentation, reports, and presentations
+- **`scripts/`**: Data processing and cleaning workflows (reference external data)
+  - `config/`: Local configuration files for external data paths (not tracked in Git)
+- **`analysis/`**: Analytical and modeling scripts
+- **`output/`**: Generated outputs - illustrative templates only (figures, tables, reports)
+- **`docs/`**: Documentation, methodology guides, and reports
+
+**No `data/` directory**: All data is stored in external, secure locations configured through `scripts/config/data_paths.R`
 
 ### 2. File Naming Conventions
 
 Use clear, descriptive names with consistent formatting:
 
-- Use lowercase with underscores: `my_analysis_file.R`
-- Number scripts to indicate order: `01_clean_data.R`, `02_analyze.R`
+- Use lowercase with underscores: `enrollment_trend_analysis.R`
+- Number scripts to indicate order: `01_data_cleaning.R`, `02_financial_analysis.R`
 - Include dates for versions if needed: `report_2026-01-15.Rmd`
 - Avoid spaces and special characters
+- Use descriptive names that reflect content: `program_health_metrics.R` not `analysis.R`
 
 ### 3. Version Control Best Practices
 
@@ -120,45 +124,56 @@ set.seed(123)
 # ==============================================================================
 ```
 
-## Data Management
+## Data Management - External Storage Model
 
-### Working with Raw Data
+### Critical Principle: No Data in Repository
 
-**Never modify raw data files.** All transformations should be scripted.
+**All data must be stored in external, secure locations** that comply with institutional data governance policies and FERPA requirements.
+
+### Working with External Data
+
+**Never commit data files to Git.** Instead:
+
+1. **Store data externally**: Keep all data in a separate, secure directory outside the repository
+2. **Configure paths locally**: Create `scripts/config/data_paths.R` with your data locations
+3. **Reference via configuration**: Scripts load data using paths from configuration file
+4. **Document sources**: Maintain metadata about data sources (separately from actual data)
 
 ```r
-# Good: Read raw data and transform via script
-raw_data <- read_csv(here("data", "raw", "original_data.csv"))
-cleaned_data <- raw_data %>% filter(!is.na(key_var))
+# Good: Reference external data via configuration
+source(here("scripts", "config", "data_paths.R"))
+enrollment_data <- read_csv(ENROLLMENT_DATA)
 
-# Bad: Manually editing Excel files
+# Bad: Hard-coded paths or data in repository
+enrollment_data <- read_csv(here("data", "raw", "enrollment.csv"))  # NO!
 ```
+
+### Data Configuration Setup
+
+Create `scripts/config/data_paths.R` (this file is in `.gitignore` and will not be committed):
+
+```r
+# Define external data root
+DATA_ROOT <- "C:/SecureData/SHRS_Analysis"  # Customize for your environment
+
+# Define paths to specific data files
+ENROLLMENT_DATA <- file.path(DATA_ROOT, "raw", "enrollment.csv")
+FINANCIAL_DATA <- file.path(DATA_ROOT, "raw", "financial.xlsx")
+# ... additional data paths
+```
+
+See `scripts/config/README.md` for detailed configuration instructions.
 
 ### Saving Processed Data
 
-Use appropriate formats:
+Save all processed/cleaned data to external locations:
 
 ```r
-# For R-only workflows (preserves data types)
-saveRDS(data, here("data", "processed", "clean_data.rds"))
+# Good: Save to external processed data location
+saveRDS(cleaned_data, file.path(PROCESSED_DATA_PATH, "cleaned_enrollment.rds"))
 
-# For sharing with other software
-write_csv(data, here("data", "processed", "clean_data.csv"))
-
-# For Stata users
-haven::write_dta(data, here("data", "processed", "clean_data.dta"))
-```
-
-### File Paths
-
-Always use relative paths with the `here` package:
-
-```r
-# Good: Works on any computer
-data <- read_csv(here("data", "raw", "mydata.csv"))
-
-# Avoid: Absolute paths won't work on other machines
-data <- read_csv("C:/Users/YourName/Documents/project/data/raw/mydata.csv")
+# Bad: Save to repository (violates data confidentiality)
+saveRDS(cleaned_data, here("data", "processed", "cleaned_data.rds"))  # NO!
 ```
 
 ## Reproducibility Checklist
@@ -166,54 +181,74 @@ data <- read_csv("C:/Users/YourName/Documents/project/data/raw/mydata.csv")
 Before sharing your analysis, ensure:
 
 - [ ] All required packages are listed in `scripts/00_setup.R`
-- [ ] No absolute file paths in code
+- [ ] Data configuration instructions are documented
+- [ ] No data files are committed to Git (check `.gitignore`)
+- [ ] Scripts reference external data via configuration file
 - [ ] Random seeds are set where needed (`set.seed()`)
-- [ ] Scripts are numbered and can run in order
-- [ ] Raw data is not modified
-- [ ] All outputs can be regenerated from scripts
-- [ ] Code runs without errors on a fresh R session
+- [ ] Scripts are numbered and can run in order (with proper data access)
+- [ ] All outputs are marked as illustrative templates
+- [ ] Code runs without errors on a fresh R session (with data access)
 - [ ] README is up to date with current workflow
-- [ ] Sensitive data is not committed to Git
+- [ ] Sensitive information is not committed to Git
+- [ ] Configuration file template is provided (but not actual config)
 
 ## Running the Full Analysis
 
-To reproduce the entire analysis from scratch:
+To reproduce the analytical workflow:
+
+### One-Time Setup
 
 1. **Setup environment**
    ```r
    source("scripts/00_setup.R")
    ```
 
-2. **Clean data**
+2. **Configure data access**
+   - Create `scripts/config/data_paths.R` (see template in `scripts/config/README.md`)
+   - Ensure you have appropriate institutional data access permissions
+   - Verify paths point to your secure data location
+
+### Run Analysis Scripts
+
+3. **Clean data**
    ```r
    source("scripts/01_data_cleaning.R")
    ```
 
-3. **Run analysis**
+4. **Run exploratory analysis**
    ```r
    source("analysis/01_exploratory_analysis.R")
    ```
 
-4. **Add additional scripts as needed**
-   - Create `scripts/02_data_processing.R` for additional data transformations
-   - Create `analysis/02_robustness_checks.R` for sensitivity analysis
-   - Add more analysis scripts following the numbered convention
+5. **Additional analyses as developed**
+   ```r
+   source("analysis/02_financial_analysis.R")
+   source("analysis/03_scenario_planning.R")
+   ```
+
+### Running Complete Workflow
 
 Or run all scripts sequentially:
 
 ```r
-# Run complete workflow
-scripts <- c(
+# Define workflow scripts
+workflow_scripts <- c(
   "scripts/00_setup.R",
   "scripts/01_data_cleaning.R",
   "analysis/01_exploratory_analysis.R"
+  # Add additional scripts as developed
 )
 
-for (script in scripts) {
+# Run complete workflow
+for (script in workflow_scripts) {
+  message("\n========================================")
   message("Running: ", script)
+  message("========================================\n")
   source(here(script))
 }
 ```
+
+**Note**: This workflow assumes you have configured external data access. Without data access, scripts will generate placeholder outputs for demonstration.
 
 ## Collaboration Tips
 
@@ -239,12 +274,34 @@ for (script in scripts) {
 
 ## Common Pitfalls to Avoid
 
-1. **Hard-coded values**: Use variables and configuration files instead
-2. **Overwriting processed data**: Use version suffixes if needed
-3. **Uncommitted changes**: Commit regularly to avoid losing work
-4. **Missing dependencies**: Always list required packages
-5. **Undocumented decisions**: Comment why you made specific choices
-6. **Large files in Git**: Use `.gitignore` for data and output files
+1. **Committing data files**: Always check that data files are in `.gitignore`
+2. **Hard-coded data paths**: Use configuration file, not hard-coded paths
+3. **Storing data in repository**: All data must be external to the repository
+4. **Sharing sensitive information**: Never commit FERPA-protected or confidential data
+5. **Missing data configuration**: Document how to configure data access
+6. **Undocumented decisions**: Comment analytical choices and assumptions
+7. **Treating outputs as final**: Remember outputs are illustrative templates
+8. **Skipping data validation**: Always validate data after import and cleaning
+
+## Data Security and Confidentiality
+
+### FERPA Compliance
+
+All work must comply with FERPA (Family Educational Rights and Privacy Act):
+
+- **No student-level data in repository**: Even aggregated data should be external
+- **De-identification when possible**: Work with aggregated or de-identified data
+- **Secure data transfer**: Use encrypted channels for any data movement
+- **Access control**: Only authorized users should access the data
+- **Audit trail**: Document who accessed data and when (outside repository)
+
+### Best Practices
+
+1. **Separate code from data**: Code in repository, data in secure external location
+2. **Configuration not hardcoding**: Use config files for data paths
+3. **Template outputs**: Generated outputs should be clearly marked as illustrative
+4. **Documentation**: Document data sources without including actual data
+5. **Team training**: Ensure all team members understand data security requirements
 
 ## Session Info
 
