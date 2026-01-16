@@ -90,13 +90,6 @@ This project employs rigorous quantitative methods to evaluate program health:
 - `modelsummary` / `gt` - Professional tables for reporting
 - `ggplot2` / `plotly` - Static and interactive visualizations
 
-## Team
-
-- **Gabe Penedo** - MQE Student, Lead Analyst
-- **Isabella Ortiz** - MQE Student, Data Analytics
-- **Taylor Lee** - MQE Student, Statistical Modeling
-- **Dave Dejung** - MQE Faculty Contact & Advisor
-
 ## Repository Structure
 
 **This repository is organized as a reproducible workflow guide**, not a data repository. The structure supports transparent, repeatable analysis:
