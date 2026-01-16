@@ -1,9 +1,14 @@
 # ==============================================================================
-# Data Cleaning Script
+# Data Cleaning Script - SHRS Program Health Analysis
 # ==============================================================================
-# This script imports and cleans raw data files
-# Input: data/raw/[your-raw-data-file]
-# Output: data/processed/cleaned_data.rds
+# This script demonstrates the data cleaning workflow for program health analysis
+# 
+# IMPORTANT: This script contains PLACEHOLDER PATHS to external data sources
+# You must create scripts/config/data_paths.R locally (not tracked in Git)
+# to define actual paths to your secure data locations
+#
+# Input: External data files (enrollment, financial, student outcomes, etc.)
+# Output: Cleaned analytical datasets (saved to external location)
 # Last Updated: January 2026
 # ==============================================================================
 
@@ -17,98 +22,139 @@ library(readxl)   # For reading Excel files
 set.seed(123)
 
 # ==============================================================================
-# 1. IMPORT RAW DATA
+# LOAD EXTERNAL DATA CONFIGURATION
 # ==============================================================================
 
-message("Step 1: Importing raw data...")
+# Check if data paths configuration exists
+config_file <- here("scripts", "config", "data_paths.R")
 
-# Example: Reading CSV file
-# raw_data <- read_csv(here("data", "raw", "your_data_file.csv"))
+if (file.exists(config_file)) {
+  source(config_file)
+  message("Loaded data paths from configuration file")
+} else {
+  stop(
+    "\n*** DATA CONFIGURATION REQUIRED ***\n",
+    "Create the file: scripts/config/data_paths.R\n",
+    "This file should define paths to your external data sources.\n\n",
+    "Example contents:\n",
+    "  DATA_ROOT <- 'C:/SecureData/SHRS_Analysis'\n",
+    "  RAW_DATA_PATH <- file.path(DATA_ROOT, 'raw')\n",
+    "  PROCESSED_DATA_PATH <- file.path(DATA_ROOT, 'processed')\n",
+    "  ENROLLMENT_DATA <- file.path(RAW_DATA_PATH, 'enrollment.csv')\n",
+    "  FINANCIAL_DATA <- file.path(RAW_DATA_PATH, 'financial.xlsx')\n\n",
+    "See README.md for more details.\n",
+    "*** This file should NOT be committed to Git ***\n"
+  )
+}
 
-# Example: Reading Stata file
-# raw_data <- read_dta(here("data", "raw", "your_data_file.dta"))
+# ==============================================================================
+# 1. IMPORT RAW DATA FROM EXTERNAL SOURCES
+# ==============================================================================
 
-# Example: Reading Excel file
-# raw_data <- read_excel(here("data", "raw", "your_data_file.xlsx"))
+message("Step 1: Importing data from external sources...")
 
-# For demonstration purposes, create a sample dataset
-# REPLACE THIS with your actual data import code
-raw_data <- tibble(
-  id = 1:100,
-  year = sample(2015:2020, 100, replace = TRUE),
-  treatment = sample(c(0, 1), 100, replace = TRUE),
-  outcome = rnorm(100, mean = 50, sd = 10),
-  covariate1 = rnorm(100, mean = 0, sd = 1),
-  covariate2 = sample(c("A", "B", "C"), 100, replace = TRUE),
-  missing_var = ifelse(runif(100) < 0.1, NA, rnorm(100))
+# PLACEHOLDER: Example data import code
+# Replace these with actual paths from your data_paths.R configuration
+#
+# Examples of data sources for SHRS Program Health Analysis:
+#
+# 1. Enrollment data by program and year
+# enrollment_raw <- read_csv(ENROLLMENT_DATA)
+#
+# 2. Financial data (revenue, costs by program)
+# financial_raw <- read_excel(FINANCIAL_DATA, sheet = "Program_Finances")
+#
+# 3. Student outcomes (licensure pass rates, employment)
+# outcomes_raw <- read_csv(STUDENT_OUTCOMES_DATA)
+#
+# 4. Faculty and resource data
+# faculty_raw <- read_csv(FACULTY_DATA)
+#
+# 5. Applicant and admissions data
+# admissions_raw <- read_csv(ADMISSIONS_DATA)
+
+# For demonstration: create placeholder structure showing expected data
+# REMOVE THIS when working with actual data
+message("  NOTE: Using placeholder data structure for demonstration")
+message("  Replace with actual data import code when configured")
+
+enrollment_raw <- tibble(
+  academic_year = rep(2018:2023, each = 8),
+  program_code = rep(c("SLP", "AuD", "CSD_UG", "AT", "DN", "SS", "SMN_UG", "Other"), 6),
+  applicants = sample(20:150, 48, replace = TRUE),
+  acceptances = NA_integer_,
+  enrolled = sample(10:80, 48, replace = TRUE),
+  tuition_revenue = sample(100000:800000, 48, replace = TRUE)
 )
 
-message("  - Raw data dimensions: ", nrow(raw_data), " rows x ", ncol(raw_data), " columns")
+message("  - Raw data dimensions: ", nrow(enrollment_raw), " rows x ", ncol(enrollment_raw), " columns")
 
 # ==============================================================================
-# 2. DATA CLEANING
+# 2. DATA CLEANING AND VALIDATION
 # ==============================================================================
 
-message("\nStep 2: Cleaning data...")
+message("\nStep 2: Cleaning and validating data...")
 
-cleaned_data <- raw_data %>%
-  # Remove duplicates based on ID
-  distinct(id, .keep_all = TRUE) %>%
+cleaned_enrollment <- enrollment_raw %>%
+  # Remove any duplicate records
+  distinct() %>%
   
-  # Handle missing values
-  # Option 1: Drop rows with any missing values
-  # drop_na() %>%
+  # Filter to focus programs only (exclude "Other")
+  filter(program_code != "Other") %>%
   
-  # Option 2: Drop rows with missing values in specific columns
-  drop_na(outcome) %>%
+  # Ensure valid year range
+  filter(academic_year >= 2018 & academic_year <= 2023) %>%
   
-  # Filter out invalid observations
-  filter(
-    year >= 2015 & year <= 2020,  # Keep only valid years
-    !is.na(id)                      # Ensure ID is not missing
-  ) %>%
-  
-  # Recode variables
+  # Calculate derived metrics
   mutate(
-    # Convert treatment to factor
-    treatment_status = factor(
-      treatment,
-      levels = c(0, 1),
-      labels = c("Control", "Treatment")
-    ),
+    # Acceptance rate (if acceptances available)
+    acceptance_rate = if_else(!is.na(acceptances) & applicants > 0,
+                             acceptances / applicants,
+                             NA_real_),
     
-    # Create categorical variable
-    covariate2_factor = factor(covariate2),
+    # Yield rate
+    yield_rate = if_else(!is.na(acceptances) & acceptances > 0,
+                        enrolled / acceptances,
+                        NA_real_),
     
-    # Create new variables
-    outcome_log = log(outcome + 1),  # Log transformation
+    # Revenue per enrolled student
+    revenue_per_student = if_else(enrolled > 0,
+                                  tuition_revenue / enrolled,
+                                  NA_real_),
     
-    # Standardize continuous variables
-    covariate1_std = scale(covariate1)[, 1]
+    # Program category grouping
+    program_category = case_when(
+      program_code %in% c("SLP", "AuD", "CSD_UG") ~ "Communication Science & Disorders",
+      program_code %in% c("AT", "DN", "SS", "SMN_UG") ~ "Sports Medicine & Nutrition",
+      TRUE ~ "Other"
+    )
   ) %>%
   
-  # Arrange data
-  arrange(id, year)
+  # Arrange by program and year
+  arrange(program_category, program_code, academic_year)
 
-message("  - Cleaned data dimensions: ", nrow(cleaned_data), " rows x ", ncol(cleaned_data), " columns")
-message("  - Observations removed: ", nrow(raw_data) - nrow(cleaned_data))
+message("  - Cleaned data dimensions: ", nrow(cleaned_enrollment), " rows x ", ncol(cleaned_enrollment), " columns")
+message("  - Observations removed: ", nrow(enrollment_raw) - nrow(cleaned_enrollment))
 
 # ==============================================================================
-# 3. DATA VALIDATION
+# 3. DATA VALIDATION CHECKS
 # ==============================================================================
 
 message("\nStep 3: Validating cleaned data...")
 
-# Check for duplicates
-if (any(duplicated(cleaned_data$id))) {
-  warning("Duplicate IDs found in cleaned data!")
+# Check for expected programs
+expected_programs <- c("SLP", "AuD", "CSD_UG", "AT", "DN", "SS", "SMN_UG")
+missing_programs <- setdiff(expected_programs, unique(cleaned_enrollment$program_code))
+
+if (length(missing_programs) > 0) {
+  warning("Missing expected programs: ", paste(missing_programs, collapse = ", "))
 } else {
-  message("  ✓ No duplicate IDs")
+  message("  ✓ All expected programs present")
 }
 
 # Check for missing values in key variables
-key_vars <- c("id", "year", "outcome", "treatment")
-missing_counts <- cleaned_data %>%
+key_vars <- c("academic_year", "program_code", "enrolled", "tuition_revenue")
+missing_counts <- cleaned_enrollment %>%
   select(all_of(key_vars)) %>%
   summarise(across(everything(), ~sum(is.na(.))))
 
@@ -121,25 +167,32 @@ if (any(missing_counts > 0)) {
 
 # Summary statistics
 message("\nSummary statistics:")
-print(summary(cleaned_data %>% select(outcome, covariate1, treatment)))
+print(summary(cleaned_enrollment %>% 
+              select(academic_year, enrolled, tuition_revenue, revenue_per_student)))
 
 # ==============================================================================
-# 4. SAVE PROCESSED DATA
+# 4. SAVE PROCESSED DATA TO EXTERNAL LOCATION
 # ==============================================================================
 
-message("\nStep 4: Saving processed data...")
+message("\nStep 4: Saving processed data to external location...")
 
-# Save as RDS (recommended for R objects, preserves data types)
-saveRDS(cleaned_data, here("data", "processed", "cleaned_data.rds"))
-message("  ✓ Saved as RDS: data/processed/cleaned_data.rds")
+# IMPORTANT: Save to external location, NOT in repository
+# Use paths from your data_paths.R configuration
 
-# Optionally save as CSV for compatibility with other software
-write_csv(cleaned_data, here("data", "processed", "cleaned_data.csv"))
-message("  ✓ Saved as CSV: data/processed/cleaned_data.csv")
+# Example: Save cleaned enrollment data
+# saveRDS(cleaned_enrollment, 
+#         file.path(PROCESSED_DATA_PATH, "cleaned_enrollment.rds"))
+# write_csv(cleaned_enrollment, 
+#          file.path(PROCESSED_DATA_PATH, "cleaned_enrollment.csv"))
+
+# For demonstration only (remove when using actual external storage):
+message("  NOTE: In actual use, save to external PROCESSED_DATA_PATH")
+message("  Example: saveRDS(data, file.path(PROCESSED_DATA_PATH, 'cleaned_enrollment.rds'))")
 
 # ==============================================================================
 # SCRIPT COMPLETE
 # ==============================================================================
 
-message("\n=== Data cleaning complete! ===")
+message("\n=== Data cleaning workflow complete! ===")
+message("REMINDER: All data files should be stored in external, secure locations")
 message("Next step: Run analysis/01_exploratory_analysis.R")

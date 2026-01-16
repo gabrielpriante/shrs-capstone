@@ -1,70 +1,134 @@
-# MQE Capstone Project - SHRS Team 2026
+# SHRS MQE Capstone Project: Program Health Analysis
 
-## Project Overview
+## Project Background & Problem Statement
 
-This repository contains the capstone project for the Master of Quantitative Economics (MQE) program, completed by the SHRS team. The project aims to conduct rigorous empirical analysis using R to address important economic questions with real-world data.
+This repository contains the methodological and analytical framework for a Master of Quantitative Economics (MQE) capstone project focused on evaluating the **financial performance, sustainability, and long-term viability** of academic programs within the University of Pittsburgh's School of Health and Rehabilitation Sciences (SHRS).
 
-## Research Question
+**This is a workflow-first, data-free repository** due to confidentiality and FERPA (Family Educational Rights and Privacy Act) considerations. No student-level or sensitive institutional data is stored in this repository. All analyses reference external, non-versioned data sources through configuration placeholders.
 
-[To be defined by the team - Please update this section with your specific research question]
+The project addresses a critical need: developing a comprehensive framework to assess program health across multiple dimensions—enrollment trends, financial sustainability, resource efficiency, and competitiveness—to inform strategic planning and resource allocation decisions.
 
-Example: "What is the impact of [policy/intervention] on [outcome variable] across [population/region], controlling for [relevant factors]?"
+## Stakeholder Vision: The Program Health Dashboard
+
+The long-term aspiration of this work is to develop a **"Program Health Dashboard"**—a comprehensive analytical tool analogous to hospital patient health dashboards that clinicians use to quickly assess vital signs and diagnose issues.
+
+This dashboard would provide SHRS leadership with:
+- Real-time metrics on program enrollment, revenue, and efficiency
+- Early warning indicators for programs at risk
+- Data-driven insights for resource allocation and strategic planning
+- Comparative benchmarks across programs and against peer institutions
+
+**Important Note**: This dashboard is a **future-state vision beyond the current course timeline**. This capstone project establishes the foundational analytical framework and proof-of-concept methodologies that would support such a dashboard's development.
+
+## Scope of Analysis
+
+The analysis focuses on the following SHRS academic programs:
+
+### Communication Science & Disorders (CSD)
+- **SLP**: Speech-Language Pathology (Graduate)
+- **AuD**: Audiology (Doctorate)
+- **UG**: Undergraduate programs in Communication Science
+
+### Sports Medicine & Nutrition (SMN)
+- **AT**: Athletic Training (Graduate)
+- **DN**: Dietetics & Nutrition (Graduate)
+- **SS**: Sports Science (Graduate)
+- **UG**: Undergraduate programs in Sports Medicine & Nutrition
+
+## Key Evaluation Dimensions
+
+The analytical framework examines programs across multiple critical dimensions:
+
+1. **Enrollment Trends**: Historical patterns, growth trajectories, cohort sizes
+2. **Competitiveness**: Applicant pools, acceptance rates, yield rates
+3. **Resource Requirements**: Faculty ratios, instructional costs, facility needs
+4. **Financial Performance**: Revenue generation, cost structures, contribution margins
+5. **Net Revenue per Student**: Program-level profitability and efficiency metrics
+6. **Scale Scenarios**: Impact of enrollment changes on financial sustainability
+7. **Efficiency Gains**: Opportunities for operational optimization
+8. **Sunset Criteria**: Evidence-based thresholds for program continuation decisions
 
 ## Data Sources
 
-The project utilizes the following data sources:
+**Note**: Due to confidentiality and FERPA requirements, **no actual data files are included in this repository**. The following data sources inform the analysis methodology:
 
-- **Primary Dataset**: [Dataset name and source]
-  - Description: [Brief description of the dataset]
-  - Access: [How to access/download the data]
-  - Time Period: [Date range covered]
-  
-- **Secondary Datasets**: [Additional datasets if applicable]
-  - [List any supplementary data sources]
+- **Alumni Employment Outcomes**: Post-graduation employment rates, salary data, career placement
+- **Departmental & Institutional Overviews**: Program structure, mission statements, strategic priorities
+- **Faculty Counts**: Faculty headcount, FTE, student-faculty ratios by program
+- **Applicants, Acceptances & Enrollment**: Admissions funnel metrics across years and programs
+- **Licensure Exam Pass Rates**: Professional certification and licensing exam performance
+- **Student Survey Data**: Reasons for enrollment declines, attrition factors, satisfaction metrics
+- **Average Student Loan Amounts**: Financial burden and debt load by program
+- **Pitt Enrollment & Gross Tuition**: Institutional-level enrollment and revenue data
+- **Retention Rates**: Year-over-year student persistence by program
+- **Tuition Rates**: Program-specific tuition and fee structures
 
-*Note: Raw data files should be placed in `data/raw/` and are not tracked in version control. See Data Management section below.*
+All scripts in this repository include **placeholder references** to external data locations that must be configured by authorized users with appropriate data access.
 
-## Methodology
+## Team
 
-The analysis employs the following methods:
+- **Gabe Penedo** - MQE Student, Lead Analyst
+- **Isabella Ortiz** - MQE Student, Data Analytics
+- **Taylor Lee** - MQE Student, Statistical Modeling
+- **Dave Dejung** - MQE Faculty Contact & Advisor
 
-1. **Data Processing**: Cleaning and preparation of raw data
-2. **Exploratory Data Analysis**: Descriptive statistics and visualization
-3. **Econometric Analysis**: [e.g., Regression analysis, Panel data methods, Time series analysis]
-4. **Robustness Checks**: Sensitivity analysis and validation
-5. **Visualization**: Publication-quality figures and tables
+## Analytical Methodology
+
+This project employs rigorous quantitative methods to evaluate program health:
+
+1. **Data Integration & Cleaning**: Harmonizing data from multiple institutional sources
+2. **Trend Analysis**: Time-series analysis of enrollment, revenue, and resource metrics
+3. **Financial Modeling**: Cost-benefit analysis, contribution margin calculations, break-even analysis
+4. **Comparative Benchmarking**: Cross-program and peer institution comparisons
+5. **Scenario Planning**: Sensitivity analysis for enrollment changes and resource allocation
+6. **Visualization**: Publication-quality dashboards and reports for stakeholder communication
 
 **Key R Packages Used**:
 - `tidyverse` - Data manipulation and visualization
-- `haven` / `readr` - Data import
-- `fixest` / `lfe` - Econometric analysis
-- `stargazer` / `modelsummary` - Results tables
-- `ggplot2` - Visualization
+- `haven` / `readr` - Data import from institutional systems
+- `fixest` / `lfe` - Panel data and econometric analysis
+- `modelsummary` / `gt` - Professional tables for reporting
+- `ggplot2` / `plotly` - Static and interactive visualizations
+
+## Team
+
+- **Gabe Penedo** - MQE Student, Lead Analyst
+- **Isabella Ortiz** - MQE Student, Data Analytics
+- **Taylor Lee** - MQE Student, Statistical Modeling
+- **Dave Dejung** - MQE Faculty Contact & Advisor
 
 ## Repository Structure
 
+**This repository is organized as a reproducible workflow guide**, not a data repository. The structure supports transparent, repeatable analysis:
+
 ```
 shrs-capstone/
-├── data/
-│   ├── raw/              # Original, unmodified data (not tracked in Git)
-│   └── processed/        # Cleaned and processed data files
-├── scripts/              # R scripts for data processing and cleaning
-├── analysis/             # R scripts for statistical analysis and modeling
-├── output/               # Generated figures, tables, and results
-├── docs/                 # Documentation, reports, and presentations
-├── README.md             # This file
+├── scripts/              # Data processing and preparation workflows
+│   ├── 00_setup.R           # Package installation and environment setup
+│   ├── 01_data_cleaning.R   # Data cleaning workflow (references external data)
+│   └── config/              # Configuration files for external data paths
+├── analysis/             # Analytical scripts and modeling
+│   ├── 01_exploratory_analysis.R  # Descriptive statistics and trends
+│   ├── 02_financial_analysis.R    # Revenue and cost modeling
+│   └── 03_scenario_planning.R     # What-if scenarios and projections
+├── output/               # Generated outputs (illustrative templates)
+│   ├── figures/             # Charts, graphs, and visualizations
+│   ├── tables/              # Summary statistics and regression tables
+│   └── reports/             # Compiled analytical reports
+├── docs/                 # Documentation and methodology guides
+│   ├── reproducible_workflow.md   # Best practices for reproducibility
+│   ├── data_dictionary.md         # Variable definitions (no actual data)
+│   └── methodology_notes.md       # Technical documentation
+├── README.md             # This file - project overview and guide
 ├── shrs-capstone.Rproj   # RStudio project file
-└── .gitignore            # Git ignore rules
+└── .gitignore            # Excludes data files and sensitive outputs
 ```
 
-## Team Members and Roles
-
-- **[Team Member 1]** - [Role/Responsibilities, e.g., Data Collection & Processing]
-- **[Team Member 2]** - [Role/Responsibilities, e.g., Statistical Analysis]
-- **[Team Member 3]** - [Role/Responsibilities, e.g., Visualization & Reporting]
-- **[Team Member 4]** - [Role/Responsibilities, e.g., Literature Review & Writing]
-
-*Please update this section with actual team member names and roles.*
+**Key Principles**:
+- **No Data in Repository**: All data references are external placeholders
+- **Workflow Documentation**: Scripts demonstrate methodology, not results
+- **Illustrative Outputs**: Generated outputs are templates, not final decisions
+- **Reproducible Methods**: Clear, numbered workflow for transparency
 
 ## Getting Started
 
@@ -72,6 +136,7 @@ shrs-capstone/
 
 - R (version 4.0 or higher recommended)
 - RStudio (recommended IDE)
+- Access to external SHRS data sources (institutional access required)
 - Required R packages (see `scripts/00_setup.R`)
 
 ### Setup Instructions
@@ -91,64 +156,159 @@ shrs-capstone/
    source("scripts/00_setup.R")
    ```
 
-4. **Add data files**:
-   - Place raw data files in `data/raw/`
-   - These files are not tracked in Git (see `.gitignore`)
+4. **Configure external data access**:
+   - **DO NOT place data files in this repository**
+   - Edit `scripts/config/data_paths.R` to point to your external data location
+   - Ensure you have appropriate institutional permissions for data access
+   - Contact your data steward for secure data access protocols
 
 ### Workflow
 
-The analysis follows a numbered workflow for reproducibility:
+The analysis follows a numbered workflow for reproducibility and transparency:
 
 1. **`scripts/00_setup.R`** - Install and load required packages
-2. **`scripts/01_data_cleaning.R`** - Import and clean raw data
-3. **`analysis/01_exploratory_analysis.R`** - Exploratory analysis, descriptive statistics, and main econometric analysis
+2. **`scripts/config/data_paths.R`** - Configure external data source locations (create this file locally)
+3. **`scripts/01_data_cleaning.R`** - Import and clean data from external sources
+4. **`analysis/01_exploratory_analysis.R`** - Descriptive statistics and trend analysis
+5. **`analysis/02_financial_analysis.R`** - Revenue and cost modeling
+6. **`analysis/03_scenario_planning.R`** - Sensitivity analysis and projections
 
-Additional scripts can be added as needed:
-- `scripts/02_data_processing.R` - Create analysis variables (if needed)
-- `analysis/02_robustness_checks.R` - Sensitivity analysis (if needed)
+**Important**: Scripts are configured with placeholder paths. You must create a local `scripts/config/data_paths.R` file (not tracked in Git) that defines actual paths to your data sources.
 
-All scripts should be run in order. Processed data and outputs will be saved to their respective folders.
+All scripts should be run in order. Outputs will be saved to the `output/` folder as illustrative templates.
 
-## Data Management
+## Data Management & Confidentiality
 
-- **Raw Data**: Store in `data/raw/`. Not tracked in version control due to size and privacy.
-- **Processed Data**: Save cleaned datasets to `data/processed/` as `.rds` or `.csv` files.
-- **Output**: All figures (`.png`, `.pdf`) and tables (`.tex`, `.html`) go in `output/`.
-- **Documentation**: Final reports, presentations, and documentation in `docs/`.
+**Critical**: This project involves sensitive student and institutional data protected by:
+- **FERPA** (Family Educational Rights and Privacy Act)
+- **University data governance policies**
+- **Institutional Review Board (IRB) protocols**
+
+### Data Handling Principles
+
+- **No Data in Repository**: Raw or processed data files are **never** committed to Git
+- **External Storage Only**: All data resides in secure, institutionally-approved locations
+- **Access Control**: Data access requires appropriate institutional permissions
+- **De-identification**: When possible, work with de-identified or aggregated data
+- **Secure Transfer**: Use encrypted channels for any data transmission
+
+### Working with External Data
+
+1. **Store data outside the repository**: Keep data in a separate, secure directory
+2. **Use configuration files**: Create a local `scripts/config/data_paths.R` file (not tracked)
+3. **Reference via placeholders**: Scripts include example paths you must customize
+4. **Document data sources**: Maintain a separate, secure data dictionary
+
+Example configuration file (`scripts/config/data_paths.R` - **create locally, do not commit**):
+```r
+# External data paths - CUSTOMIZE FOR YOUR ENVIRONMENT
+# This file should NOT be committed to Git
+
+DATA_ROOT <- "C:/SecureData/SHRS_Analysis"  # or network path
+RAW_DATA_PATH <- file.path(DATA_ROOT, "raw")
+PROCESSED_DATA_PATH <- file.path(DATA_ROOT, "processed")
+
+# Specific data file paths
+ENROLLMENT_DATA <- file.path(RAW_DATA_PATH, "enrollment_data.csv")
+FINANCIAL_DATA <- file.path(RAW_DATA_PATH, "financial_data.xlsx")
+# ... additional paths as needed
+```
 
 ## Reproducibility Guidelines
 
-To ensure reproducible research:
+To ensure reproducible and transparent research:
 
-1. **Never modify raw data files** - All changes should be scripted
-2. **Use relative paths** - The R Project file ensures consistent working directory
-3. **Set seeds** - Use `set.seed()` for any random processes
-4. **Document dependencies** - List all required packages and versions
-5. **Comment your code** - Explain complex operations and decisions
-6. **Version control** - Commit regularly with descriptive messages
+1. **Never commit data files** - All data stays external to the repository
+2. **Document your environment** - Use `sessionInfo()` to record package versions
+3. **Use relative references** - The R Project file and config ensure portability
+4. **Set seeds** - Use `set.seed()` for any random processes
+5. **Comment your code** - Explain analytical decisions and assumptions
+6. **Version control workflow** - Commit regularly with descriptive messages
+7. **Maintain data lineage** - Document transformations from raw to analytical datasets
+
+## Collaboration Norms
+
+Team members should adhere to these collaborative practices:
+
+### Communication
+- **Regular Check-ins**: Weekly team meetings to discuss progress and challenges
+- **Documentation**: Clearly document analytical decisions and methodological choices
+- **Code Review**: Peer review of analytical scripts before finalizing
+- **Transparency**: Share interim findings and solicit feedback early
+
+### Version Control Practices
+1. **Pull before you push**: Always `git pull` before starting work
+2. **Descriptive commits**: Write clear, informative commit messages
+3. **Feature branches**: Create branches for major analytical additions
+4. **Small commits**: Commit logical units of work, not massive changes
+5. **Test before committing**: Ensure scripts run without errors
+
+### Code Quality
+- Follow the tidyverse style guide for R code
+- Use meaningful variable names that reflect analytical concepts
+- Structure scripts with clear sections and comments
+- Avoid hard-coded values; use configuration files instead
+- Write modular, reusable functions when appropriate
+
+## Important Disclaimers
+
+### Outputs Are Illustrative Templates
+
+**All outputs generated by this repository are illustrative templates and methodological demonstrations**, not final institutional decisions. Actual program evaluation decisions require:
+- Comprehensive stakeholder input
+- Qualitative context beyond quantitative metrics
+- Consideration of strategic priorities and mission alignment
+- Formal institutional review processes
+- Approval by appropriate governance bodies
+
+### Limitations and Scope
+
+This capstone project:
+- Provides a **methodological framework**, not definitive answers
+- Demonstrates **analytical approaches** that could inform decision-making
+- Establishes **proof-of-concept** for future dashboard development
+- Does **not** represent official SHRS or University of Pittsburgh policy
+
+The Program Health Dashboard vision is a **long-term aspiration beyond the course timeline** and would require substantial additional development, validation, and institutional buy-in.
 
 ## Contributing
 
 Team members should:
 
-1. Create a new branch for major changes
-2. Write clear commit messages
-3. Test code before committing
-4. Document any new functions or complex code
-5. Update the README if adding new components
+1. Review collaboration norms above before contributing
+2. Create feature branches for major analytical work
+3. Write clear, descriptive commit messages
+4. Test all scripts before committing
+5. Document methodological choices and assumptions
+6. Update documentation when adding new analyses
+7. Respect data confidentiality at all times
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Contact
+**Note**: While the code and methodology are open source, this license does **not** grant access to any underlying data, which remains subject to institutional data governance policies and FERPA protections.
 
-For questions or collaboration inquiries, please contact:
+## Contact & Support
 
-- Project Lead: [Name and email]
-- Institution: [University/Institution name]
-- Program: Master of Quantitative Economics (MQE)
+For questions about this project:
+
+- **Project Team**: Contact via University of Pittsburgh email
+- **MQE Program**: Dave Dejung, MQE Faculty Contact
+- **Institution**: University of Pittsburgh, School of Health and Rehabilitation Sciences (SHRS)
+- **Program**: Master of Quantitative Economics (MQE)
+
+For data access requests: Contact SHRS administration through official university channels.
+
+## Acknowledgments
+
+This project was conducted as part of the MQE capstone requirement at the University of Pittsburgh. We thank:
+- SHRS leadership for defining this important research question
+- MQE faculty for methodological guidance
+- Institutional research staff for data access support
 
 ---
 
 *Last Updated: January 2026*
+
+**Repository Purpose**: This is a methodological and analytical framework repository, not a data repository. All analyses reference external data sources due to confidentiality requirements.

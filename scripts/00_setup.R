@@ -1,7 +1,8 @@
 # ==============================================================================
 # Setup Script - Package Installation and Loading
 # ==============================================================================
-# This script installs and loads all required packages for the SHRS capstone project
+# This script installs and loads all required packages for the SHRS capstone
+# project focused on Program Health Analysis
 # Run this script once when first setting up the project
 # Last Updated: January 2026
 # ==============================================================================
@@ -40,12 +41,13 @@ viz_packages <- c(
   "scales",       # Scale functions for visualization
   "gridExtra",    # Arranging multiple plots
   "patchwork",    # Combining ggplots
-  "ggthemes"      # Additional themes for ggplot2
+  "ggthemes",     # Additional themes for ggplot2
+  "plotly"        # Interactive visualizations
 )
 
 # Tables and output packages
 output_packages <- c(
-  "stargazer",    # LaTeX and HTML tables
+  "gt",           # Modern table creation
   "modelsummary", # Modern regression tables
   "knitr",        # Dynamic report generation
   "kableExtra"    # Enhanced table formatting
@@ -72,6 +74,15 @@ library(here)
 message("\n=== Session Info ===")
 print(sessionInfo())
 
+# Reminder about data configuration
+message("\n=== IMPORTANT: Data Configuration ===")
+message("This repository does not contain data files.")
+message("Before running analysis scripts, you must:")
+message("  1. Create scripts/config/data_paths.R (not tracked in Git)")
+message("  2. Define paths to your external data sources")
+message("  3. Ensure you have appropriate data access permissions")
+message("\nSee README.md for detailed data configuration instructions.")
+
 message("\n=== Setup Complete ===")
 message("All required packages are installed and ready to use.")
-message("Remember to load specific packages as needed in your analysis scripts.")
+message("Remember to configure external data paths before running analysis scripts.")

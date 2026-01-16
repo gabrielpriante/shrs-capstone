@@ -49,9 +49,19 @@ po/*~
 # RStudio Connect folder
 rsconnect/
 
-# Data files (raw data should not be tracked)
-data/raw/*
-!data/raw/.gitkeep
+# Data configuration (contains paths to external data - DO NOT COMMIT)
+scripts/config/data_paths.R
+scripts/config/*.R
+
+# External data references (all data stored externally, not in repository)
+data/
+*.csv
+*.xlsx
+*.xls
+*.dta
+*.sav
+*.rds
+*.RData
 
 # Large output files
 *.pdf
