@@ -189,17 +189,15 @@ To reproduce the entire analysis from scratch:
    source("scripts/01_data_cleaning.R")
    ```
 
-3. **Process data** (if applicable)
-   ```r
-   source("scripts/02_data_processing.R")
-   ```
-
-4. **Run analysis**
+3. **Run analysis**
    ```r
    source("analysis/01_exploratory_analysis.R")
-   source("analysis/02_main_analysis.R")
-   source("analysis/03_robustness_checks.R")
    ```
+
+4. **Add additional scripts as needed**
+   - Create `scripts/02_data_processing.R` for additional data transformations
+   - Create `analysis/02_robustness_checks.R` for sensitivity analysis
+   - Add more analysis scripts following the numbered convention
 
 Or run all scripts sequentially:
 

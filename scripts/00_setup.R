@@ -19,9 +19,8 @@ install_if_missing <- function(packages) {
 
 # Core packages for data manipulation and analysis
 core_packages <- c(
-  "tidyverse",    # Data manipulation and visualization
+  "tidyverse",    # Data manipulation and visualization (includes readr, ggplot2, dplyr, tidyr, etc.)
   "here",         # Relative file paths
-  "readr",        # Reading CSV files
   "haven",        # Reading Stata, SPSS, SAS files
   "readxl",       # Reading Excel files
   "data.table"    # Fast data manipulation
@@ -36,9 +35,8 @@ stats_packages <- c(
   "lmtest"        # Testing linear regression models
 )
 
-# Visualization packages
+# Visualization packages (additional to tidyverse)
 viz_packages <- c(
-  "ggplot2",      # Grammar of graphics (included in tidyverse)
   "scales",       # Scale functions for visualization
   "gridExtra",    # Arranging multiple plots
   "patchwork",    # Combining ggplots
