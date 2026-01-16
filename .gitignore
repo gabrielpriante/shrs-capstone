@@ -50,8 +50,12 @@ po/*~
 rsconnect/
 
 # Data configuration (contains paths to external data - DO NOT COMMIT)
+# Block the user's local config, but allow tracked template and loader
 scripts/config/data_paths.R
-scripts/config/*.R
+
+# But DO track these specific files (exceptions to the above):
+!scripts/config/data_paths.example.R
+!scripts/config/load_data_paths.R
 
 # External data references (all data stored externally, not in repository)
 data/
