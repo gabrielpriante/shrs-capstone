@@ -70,7 +70,7 @@ All scripts in this repository include **placeholder references** to external da
 - **Isabella Ortiz** - MQE Student, Data Consultant I
 - **Taylor Lee** - MQE Student, Data Consultant II
 - **Gabe Penedo** - MQE Student, Data Consultant III
-- **Dave Dejung** - MQE Faculty Contact & Advisor
+- **Dave DeJong** - MQE Faculty Contact & Advisor
 
 ## Analytical Methodology
 
