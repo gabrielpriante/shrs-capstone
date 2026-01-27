@@ -312,6 +312,5 @@ This project was conducted as part of the MQE capstone requirement at the Univer
 
 **Repository Purpose**: This is a methodological and analytical framework repository, not a data repository. All analyses reference external data sources due to confidentiality requirements.
 
-<img width="515" height="359" alt="Screenshot 2026-01-27 at 1 12 24 PM" src="https://github.com/user-attachments/assets/6830f6ce-dd89-4ed5-9f30-3e5a6e3613f3" />
 
 
