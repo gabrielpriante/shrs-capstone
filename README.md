@@ -1,5 +1,11 @@
 # SHRS MQE Capstone Project: Program Health Analysis
 
+## Our Vision: The Program Health Dashboard
+
+<img width="515" height="359" alt="Program Health Dashboard Vision" src="https://github.com/user-attachments/assets/6830f6ce-dd89-4ed5-9f30-3e5a6e3613f3" />
+
+*The image above represents our target outcome: a comprehensive Program Health Dashboard that will enable data-driven decision-making for SHRS leadership.*
+
 ## Project Background & Problem Statement
 
 This repository contains the methodological and analytical framework for a Master of Quantitative Economics (MQE) capstone project focused on evaluating the **financial performance, sustainability, and long-term viability** of academic programs within the University of Pittsburgh's School of Health and Rehabilitation Sciences (SHRS).
@@ -8,21 +14,17 @@ This repository contains the methodological and analytical framework for a Maste
 
 The project addresses a critical need: developing a comprehensive framework to assess program health across multiple dimensions—enrollment trends, financial sustainability, resource efficiency, and competitiveness—to inform strategic planning and resource allocation decisions.
 
-## Stakeholder Vision: The Program Health Dashboard
+## What We're Building Toward
 
-The long-term aspiration of this work is to develop a **"Program Health Dashboard"**—a comprehensive analytical tool analogous to hospital patient health dashboards that clinicians use to quickly assess vital signs and diagnose issues.
+As shown in the vision dashboard above, **we are working toward creating a comprehensive Program Health Dashboard**—an analytical tool analogous to hospital patient health dashboards that clinicians use to quickly assess vital signs and diagnose issues.
 
-This dashboard would provide SHRS leadership with:
+This dashboard will provide SHRS leadership with:
 - Real-time metrics on program enrollment, revenue, and efficiency
 - Early warning indicators for programs at risk
 - Data-driven insights for resource allocation and strategic planning
 - Comparative benchmarks across programs and against peer institutions
 
-**Important Note**: This dashboard is a **future-state vision beyond the current course timeline**. This capstone project establishes the foundational analytical framework and proof-of-concept methodologies that would support such a dashboard's development.
-
-### Visual Mockups
-
-Visual designs and mockups of what the final product should look like are stored in the [`images/`](images/) directory. See [images/README.md](images/README.md) for instructions on how to add or view mockup images.
+**Important Note**: While the full dashboard shown above is a **future-state vision beyond the current course timeline**, this capstone project establishes the foundational analytical framework and proof-of-concept methodologies that will support the dashboard's development. The work in this repository directly contributes to making that vision a reality.
 
 ## Scope of Analysis
 
@@ -116,8 +118,6 @@ shrs-capstone/
 │   ├── reproducible_workflow.md   # Best practices for reproducibility
 │   ├── data_dictionary.md         # Variable definitions (no actual data)
 │   └── methodology_notes.md       # Technical documentation
-├── images/               # Visual mockups and design assets
-│   └── README.md            # Instructions for adding images
 ├── README.md             # This file - project overview and guide
 ├── shrs-capstone.Rproj   # RStudio project file
 └── .gitignore            # Excludes data files and sensitive outputs

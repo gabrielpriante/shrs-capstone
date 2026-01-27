@@ -69,18 +69,11 @@ data/
 
 # Large output files
 *.pdf
-output/*.png
-output/*.jpg
-output/*.jpeg
+*.png
+*.jpg
+*.jpeg
 output/*.html
 output/*.tex
-
-# Allow images in the images/ directory for documentation
-!images/*.png
-!images/*.jpg
-!images/*.jpeg
-!images/*.gif
-!images/*.svg
 
 # OS files
 .DS_Store
