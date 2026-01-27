@@ -20,6 +20,10 @@ This dashboard would provide SHRS leadership with:
 
 **Important Note**: This dashboard is a **future-state vision beyond the current course timeline**. This capstone project establishes the foundational analytical framework and proof-of-concept methodologies that would support such a dashboard's development.
 
+### Visual Mockups
+
+Visual designs and mockups of what the final product should look like are stored in the [`images/`](images/) directory. See [images/README.md](images/README.md) for instructions on how to add or view mockup images.
+
 ## Scope of Analysis
 
 The analysis focuses on the following SHRS academic programs:
@@ -112,6 +116,8 @@ shrs-capstone/
 │   ├── reproducible_workflow.md   # Best practices for reproducibility
 │   ├── data_dictionary.md         # Variable definitions (no actual data)
 │   └── methodology_notes.md       # Technical documentation
+├── images/               # Visual mockups and design assets
+│   └── README.md            # Instructions for adding images
 ├── README.md             # This file - project overview and guide
 ├── shrs-capstone.Rproj   # RStudio project file
 └── .gitignore            # Excludes data files and sensitive outputs
