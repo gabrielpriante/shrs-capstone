@@ -1,0 +1,459 @@
+---
+title: "SHRS Market Analysis — BLS Employment Analysis"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+# 0 — Load Prepared Data
+
+This file sources `market_01_data_prep.Rmd` to load all cleaned BLS data into
+memory. Make sure File 1 is in the same directory as this file.
+
+```{r source-prep}
+# Extract and run all R code from the data prep file
+source(knitr::purl("market_01_data_prep.Rmd", output = tempfile(), quiet = TRUE))
+```
+
+```{r extra-packages}
+#install.packages(c("scales", "knitr", "kableExtra"))
+library(scales)
+library(tidyverse)
+
+library(kableExtra)
+```
+
+---
+
+# 1 — Historical Employment Trends (OEWS 2019–2024)
+
+How has employment in SHRS-related occupations changed over the past several
+years? Are these fields growing, shrinking, or stagnant?
+
+## 1.1 Employment Over Time
+
+```{r emp-trends-plot, fig.height=7}
+oews |>
+  ggplot(aes(x = year, y = tot_emp, color = shrs_program)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  facet_wrap(~ shrs_program, scales = "free_y", ncol = 2) +
+  scale_y_continuous(labels = comma) +
+  scale_x_continuous(breaks = unique(oews$year)) +
+  labs(
+    title    = "National Employment Trends by SHRS Occupation",
+    subtitle = "Source: BLS Occupational Employment and Wage Statistics (OEWS)",
+    x = NULL, y = "Total Employment"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 1.2 Employment Growth Summary
+
+```{r emp-growth-table}
+emp_growth <- oews |>
+  group_by(shrs_program, occ_title) |>
+  summarise(
+    emp_first_year = first(tot_emp),
+    emp_last_year  = last(tot_emp),
+    year_start     = min(year),
+    year_end       = max(year),
+    abs_change     = last(tot_emp) - first(tot_emp),
+    pct_change     = round((last(tot_emp) / first(tot_emp) - 1) * 100, 1),
+    .groups        = "drop"
+  ) |>
+  arrange(desc(pct_change))
+
+emp_growth |>
+  select(Program = shrs_program, Occupation = occ_title,
+         `Start Emp` = emp_first_year, `End Emp` = emp_last_year,
+         `Change` = abs_change, `Growth (%)` = pct_change) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 1.3 Wage Trends
+
+```{r wage-trends-plot, fig.height=7}
+oews |>
+  ggplot(aes(x = year, y = a_median, color = shrs_program)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  facet_wrap(~ shrs_program, scales = "free_y", ncol = 2) +
+  scale_y_continuous(labels = dollar) +
+  scale_x_continuous(breaks = unique(oews$year)) +
+  labs(
+    title    = "Median Annual Wage Trends by SHRS Occupation",
+    subtitle = "Source: BLS OEWS",
+    x = NULL, y = "Median Annual Wage"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 1.4 Wage Comparison Across Programs (Latest Year)
+
+```{r wage-comparison}
+latest_year <- max(oews$year)
+
+oews |>
+  filter(year == latest_year) |>
+  ggplot(aes(x = reorder(shrs_program, a_median), y = a_median,
+             fill = shrs_dept)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = dollar(a_median)), hjust = -0.1, size = 4) +
+  coord_flip() +
+  scale_y_continuous(labels = dollar, expand = expansion(mult = c(0, 0.2))) +
+  labs(
+    title    = paste0("Median Annual Wage by SHRS Occupation (", latest_year, ")"),
+    subtitle = "Source: BLS OEWS",
+    x = NULL, y = "Median Annual Wage", fill = "Department"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+---
+
+# 2 — BLS Employment Projections Across Cycles
+
+How has the BLS outlook for these occupations evolved over successive projection
+cycles? A consistently positive outlook is a strong signal; an improving outlook
+is even better.
+
+## 2.1 Projected Growth Rate by Cycle
+
+```{r proj-cycle-plot, fig.height=7}
+projections |>
+  ggplot(aes(x = cycle, y = emp_change_pct, fill = shrs_program)) +
+  geom_col(position = "dodge", width = 0.7) +
+  geom_hline(yintercept = all_occ_growth_pct, linetype = "dashed",
+             color = "gray40", linewidth = 0.7) +
+  annotate("text", x = 1, y = all_occ_growth_pct + 1,
+           label = paste0("All occupations: ", all_occ_growth_pct, "%"),
+           hjust = 0, size = 3.5, color = "gray40") +
+  facet_wrap(~ shrs_program, ncol = 2, scales = "free_y") +
+  labs(
+    title    = "BLS Projected Employment Growth (%) Across Projection Cycles",
+    subtitle = "Dashed line = all-occupations benchmark from latest cycle",
+    x = "Projection Cycle", y = "Projected Growth (%)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 2.2 Projections Summary Table (Latest Cycle)
+
+```{r proj-latest-table}
+proj_latest <- projections |>
+  filter(base_year == max(base_year))
+
+proj_latest |>
+  mutate(
+    vs_benchmark = round(emp_change_pct - all_occ_growth_pct, 1),
+    signal = case_when(
+      emp_change_pct >= all_occ_growth_pct * 2 ~ "Strong Growth",
+      emp_change_pct >= all_occ_growth_pct     ~ "Above Average",
+      emp_change_pct >= 0                       ~ "Below Average",
+      TRUE                                      ~ "Declining"
+    )
+  ) |>
+  select(Program = shrs_program, Cycle = cycle,
+         `Base Emp (000s)` = emp_base,
+         `Proj Emp (000s)` = emp_projected,
+         `Growth (%)` = emp_change_pct,
+         `vs All Occ (pp)` = vs_benchmark,
+         Signal = signal,
+         `Openings/yr (000s)` = annual_openings,
+         `Median Wage` = median_wage) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 3 — Job Openings & Separations
+
+Job openings come from two sources: **growth** (new positions created) and
+**replacement** (people leaving through retirement, career changes, etc.).
+Even slow-growth occupations can have strong demand if turnover is high.
+
+```{r separations-chart}
+sep_long <- separations |>
+  select(shrs_program, lf_exits, occ_transfers,
+         emp_change_numeric) |>
+  rename(
+    `Labor Force Exits` = lf_exits,
+    `Occupational Transfers` = occ_transfers,
+    `Growth` = emp_change_numeric
+  ) |>
+  pivot_longer(-shrs_program, names_to = "component", values_to = "value")
+
+sep_long |>
+  ggplot(aes(x = reorder(shrs_program, value, sum), y = value,
+             fill = component)) +
+  geom_col(width = 0.6) +
+  coord_flip() +
+  scale_fill_manual(values = c("Growth" = "#2c7bb6",
+                                "Labor Force Exits" = "#d7191c",
+                                "Occupational Transfers" = "#fdae61")) +
+  labs(
+    title    = "Components of Annual Job Openings by SHRS Occupation",
+    subtitle = "Latest BLS projection cycle (thousands per year)",
+    x = NULL, y = "Annual Openings (thousands)", fill = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+```{r separations-table}
+separations |>
+  select(Program = shrs_program,
+         `Exit Rate (%)` = lf_exit_rate,
+         `Transfer Rate (%)` = occ_transfer_rate,
+         `Total Sep Rate (%)` = total_sep_rate,
+         `Annual Openings (000s)` = annual_openings) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 4 — Macro Context & Benchmarking
+
+How do SHRS occupations compare to the overall economy?
+
+## 4.1 Growth Benchmarking
+
+```{r benchmark-chart}
+benchmark_df <- proj_latest |>
+  select(shrs_program, emp_change_pct) |>
+  bind_rows(
+    tibble(shrs_program = "All Occupations", emp_change_pct = all_occ_growth_pct),
+    tibble(shrs_program = "Labor Force", emp_change_pct = lf_growth_2024_2034)
+  ) |>
+  mutate(
+    is_benchmark = shrs_program %in% c("All Occupations", "Labor Force"),
+    fill_color = if_else(is_benchmark, "Benchmark", "SHRS Program")
+  )
+
+benchmark_df |>
+  ggplot(aes(x = reorder(shrs_program, emp_change_pct),
+             y = emp_change_pct, fill = fill_color)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(emp_change_pct, "%")),
+            hjust = -0.1, size = 4) +
+  coord_flip() +
+  scale_fill_manual(values = c("SHRS Program" = "#2c7bb6",
+                                "Benchmark" = "#cccccc")) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.2))) +
+  labs(
+    title    = "Projected Employment Growth: SHRS Occupations vs Benchmarks",
+    subtitle = paste0("Latest BLS cycle (", proj_latest$cycle[1], ")"),
+    x = NULL, y = "Projected Growth (%)", fill = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+## 4.2 Healthcare Industry Context
+
+```{r industry-context}
+
+healthcare_row <- industry |>
+  filter(str_detect(industry_sector, regex("health care|healthcare",
+                                            ignore_case = TRUE)))
+
+if (nrow(healthcare_row) > 0) {
+  ind_cols <- names(industry)
+  emp_cols <- str_which(ind_cols, "employment")
+
+  healthcare_summary <- healthcare_row |>
+    select(industry_sector, all_of(ind_cols[emp_cols]))
+
+  healthcare_summary |>
+    kable(format.args = list(big.mark = ",")) |>
+    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+}
+```
+
+## 4.3 Labor Force Overview
+
+```{r lf-table}
+lf_summary |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 5 — Program-Level Market Demand Scorecard
+
+This is the synthesis: for each SHRS program, we combine historical trends,
+forward projections, wage levels, and job openings into an overall market
+demand assessment.
+
+```{r scorecard}
+scorecard <- proj_latest |>
+  select(shrs_program, shrs_dept, emp_change_pct, annual_openings, median_wage) |>
+  left_join(
+    emp_growth |> select(shrs_program, historical_growth_pct = pct_change),
+    by = "shrs_program"
+  ) |>
+  left_join(
+    separations |> select(shrs_program, total_sep_rate),
+    by = "shrs_program"
+  ) |>
+  mutate(
+    # Score components (each 0-3)
+    growth_score = case_when(
+      emp_change_pct >= all_occ_growth_pct * 2 ~ 3,
+      emp_change_pct >= all_occ_growth_pct     ~ 2,
+      emp_change_pct >= 0                       ~ 1,
+      TRUE                                      ~ 0
+    ),
+    wage_score = case_when(
+      median_wage >= 90000 ~ 3,
+      median_wage >= 60000 ~ 2,
+      median_wage >= 40000 ~ 1,
+      TRUE                 ~ 0
+    ),
+    openings_score = case_when(
+      annual_openings >= 10 ~ 3,
+      annual_openings >= 3  ~ 2,
+      annual_openings >= 1  ~ 1,
+      TRUE                  ~ 0
+    ),
+    turnover_score = case_when(
+      total_sep_rate >= 6 ~ 3,
+      total_sep_rate >= 4 ~ 2,
+      total_sep_rate >= 2 ~ 1,
+      TRUE                ~ 0
+    ),
+    # Composite score (out of 12)
+    composite_score = growth_score + wage_score + openings_score + turnover_score,
+    # Overall signal
+    market_signal = case_when(
+      composite_score >= 10 ~ "Strong",
+      composite_score >= 7  ~ "Favorable",
+      composite_score >= 4  ~ "Moderate",
+      TRUE                  ~ "Weak"
+    )
+  )
+```
+
+## 5.1 Scorecard Table
+
+```{r scorecard-table}
+scorecard |>
+  select(
+    Program          = shrs_program,
+    Dept             = shrs_dept,
+    `Hist Growth (%)`  = historical_growth_pct,
+    `Proj Growth (%)`  = emp_change_pct,
+    `Median Wage`      = median_wage,
+    `Openings/yr (000s)` = annual_openings,
+    `Sep Rate (%)`     = total_sep_rate,
+    `Score (0-12)`     = composite_score,
+    Signal           = market_signal
+  ) |>
+  arrange(desc(`Score (0-12)`)) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 5.2 Scorecard Visualization
+
+```{r scorecard-viz, fig.height=5}
+scorecard |>
+  select(shrs_program, growth_score, wage_score,
+         openings_score, turnover_score) |>
+  pivot_longer(-shrs_program, names_to = "dimension", values_to = "score") |>
+  mutate(dimension = case_when(
+    dimension == "growth_score"   ~ "Projected Growth",
+    dimension == "wage_score"     ~ "Wage Level",
+    dimension == "openings_score" ~ "Annual Openings",
+    dimension == "turnover_score" ~ "Replacement Demand"
+  )) |>
+  ggplot(aes(x = dimension, y = score, fill = dimension)) +
+  geom_col(width = 0.7) +
+  facet_wrap(~ shrs_program, nrow = 1) +
+  scale_y_continuous(limits = c(0, 3), breaks = 0:3) +
+  labs(
+    title = "Market Demand Scorecard by SHRS Program",
+    subtitle = "Each dimension scored 0-3; higher = stronger market signal",
+    x = NULL, y = "Score (0-3)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+---
+
+# 6 — Key Takeaways
+
+```{r takeaways, results='asis'}
+for (i in seq_len(nrow(scorecard))) {
+  row <- scorecard[i, ]
+  cat(paste0("\n## ", row$shrs_program, " — ", row$market_signal, "\n\n"))
+
+  cat(paste0("- **Projected growth**: ", row$emp_change_pct,
+             "% (vs ", all_occ_growth_pct, "% all occupations)\n"))
+  cat(paste0("- **Historical growth**: ", row$historical_growth_pct,
+             "% (OEWS ", min(oews$year), "-", max(oews$year), ")\n"))
+  cat(paste0("- **Median wage**: $", format(row$median_wage, big.mark = ","), "\n"))
+  cat(paste0("- **Annual openings**: ",
+             format(row$annual_openings * 1000, big.mark = ","), "\n"))
+  cat(paste0("- **Separation rate**: ", row$total_sep_rate, "%\n"))
+  cat(paste0("- **Composite score**: ", row$composite_score, "/12\n\n"))
+}
+```
+
+---
+
+# Appendix: Data Sources & Methodology
+
+**Data Sources:**
+
+- BLS Occupational Employment and Wage Statistics (OEWS), `r min(oews$year)`–`r max(oews$year)`
+- BLS Employment Projections, multiple cycles through `r proj_latest$cycle[1]`
+- BLS Labor Force Projections, 2024–2034
+- BLS Aggregate Economy Tables, 2024–2034
+- BLS Industry Employment Projections, 2024–2034
+
+**Scorecard Methodology:**
+
+Four dimensions scored 0–3 each (max composite = 12):
+
+| Dimension | 0 | 1 | 2 | 3 |
+|---|---|---|---|---|
+| Projected Growth | Declining | 0–`r all_occ_growth_pct`% | `r all_occ_growth_pct`–`r all_occ_growth_pct*2`% | >`r all_occ_growth_pct*2`% |
+| Wage Level | <$40K | $40–60K | $60–90K | >$90K |
+| Annual Openings | <1K | 1–3K | 3–10K | >10K |
+| Replacement Demand | <2% | 2–4% | 4–6% | >6% |
+
+**Known Limitations:**
+
+1. OEWS historical data covers `r min(oews$year)`–`r max(oews$year)` only (2014–2018 files pending)
+2. Some projection cycle labels may need cleanup
+3. Employment figures in projections are in thousands; OEWS figures are counts
+4. Scorecard thresholds are illustrative and should be validated with SHRS leadership

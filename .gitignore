@@ -1,80 +1,14 @@
-# History files
-.Rhistory
-.Rapp.history
-
-# Session Data files
-.RData
-.RDataTmp
-
-# User-specific files
-.Ruserdata
-
-# Example code in package build process
-*-Ex.R
-
-# Output files from R CMD build
-/*.tar.gz
-
-# Output files from R CMD check
-/*.Rcheck/
-
-# RStudio files
-.Rproj.user/
-
-# produced vignettes
-vignettes/*.html
-vignettes/*.pdf
-
-# OAuth2 token, see https://github.com/hadley/httr/releases/tag/v0.3
-.httr-oauth
-
-# knitr and R markdown default cache directories
-*_cache/
-/cache/
-
-# Temporary files created by R markdown
-*.utf8.md
-*.knit.md
-
-# R Environment Variables
-.Renviron
-
-# pkgdown site (exclude pkgdown-generated sites but allow our docs/ folder)
-_site/
-site_libs/
-
-# translation temp files
-po/*~
-
-# RStudio Connect folder
-rsconnect/
-
-# Data configuration (contains paths to external data - DO NOT COMMIT)
-# Block the user's local config, but allow tracked template and loader
-scripts/config/data_paths.R
-
-# But DO track these specific files (exceptions to the above):
-!scripts/config/data_paths.example.R
-!scripts/config/load_data_paths.R
-
-# External data references (all data stored externally, not in repository)
-data/
+# Data files
 *.csv
 *.xlsx
 *.xls
-*.dta
-*.sav
 *.rds
-*.RData
+*.sav
+*.dta
 
-# Large output files
-*.pdf
-*.png
-*.jpg
-*.jpeg
-output/*.html
-output/*.tex
+# Market analysis generated files
+analysis/market/*.html
+analysis/market/*.R
 
-# OS files
+# Mac files
 .DS_Store
-Thumbs.db

@@ -1,0 +1,510 @@
+---
+title: "SHRS Market Analysis — Data Preparation"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+---
+
+```{r prep-setup, include=FALSE}
+
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+# 1 — Setup
+
+## 1.1 Packages
+
+```{r packages}
+library(tidyverse)
+library(readxl)
+library(janitor)
+```
+
+## 1.2 Data Paths
+
+Edit the paths below to match your local machine. These should point to the
+`bls/` folder inside your secure `SHRS_Analysis` directory — **not** inside the
+Git repository.
+
+```{r paths}
+# ── EDIT THIS ONE LINE to match your machine ──
+BLS_ROOT <- file.path(path.expand("~"), "Documents", "SHRS_Analysis",
+                       "market_analysis", "bls")
+
+# Everything else is derived
+OEWS_PATH        <- file.path(BLS_ROOT, "oews")
+PROJ_PATH        <- file.path(BLS_ROOT, "projections")
+LABOR_FORCE_PATH <- file.path(BLS_ROOT, "labor_force", "labor-force.xlsx")
+INDUSTRY_PATH    <- file.path(BLS_ROOT, "industry", "industry.xlsx")
+AGG_ECON_PATH    <- file.path(BLS_ROOT, "aggregate_economy",
+                               "aggregate-economy-tables.xlsx")
+```
+
+## 1.3 SOC Code Crosswalk
+
+This maps each SHRS program to the Bureau of Labor Statistics Standard
+Occupational Classification (SOC) codes we're tracking.
+
+```{r soc-crosswalk}
+soc_crosswalk <- tribble(
+  ~shrs_program, ~shrs_dept, ~soc_code,  ~occupation_title,
+  "SLP",         "CSD",      "29-1127",  "Speech-Language Pathologists",
+
+  "AuD",         "CSD",      "29-1181",  "Audiologists",
+  "DN",          "SMN",      "29-1031",  "Dietitians and Nutritionists",
+  "AT",          "SMN",      "29-9091",  "Athletic Trainers",
+  "SS",          "SMN",      "29-1128",  "Exercise Physiologists"
+)
+
+target_socs <- soc_crosswalk$soc_code
+
+soc_crosswalk
+```
+
+---
+
+# 2 — OEWS Historical Data (2014–2024)
+
+The Occupational Employment and Wage Statistics files live inside year-specific
+subfolders (e.g. `oesm24nat/national_M2024_dl.xlsx`). The column layout changed
+over time — older files have ~20 columns while newer files have ~32. We select
+only the columns we need so everything stacks cleanly.
+
+```{r oews-load}
+# Discover all OEWS subfolders
+oews_folders <- list.dirs(OEWS_PATH, recursive = FALSE)
+
+# Helper: read one OEWS file and return a tidy tibble
+read_oews <- function(folder_path) {
+  # Find the xlsx file inside the folder
+  xlsx_file <- list.files(folder_path, pattern = "\\.xlsx$",
+                          full.names = TRUE, ignore.case = TRUE)
+
+  if (length(xlsx_file) == 0) {
+    message("No xlsx found in: ", folder_path)
+    return(NULL)
+  }
+
+  # Extract year from filename (e.g. "national_M2024_dl.xlsx" -> 2024)
+  fname <- basename(xlsx_file[1])
+  year  <- as.integer(str_extract(fname, "\\d{4}"))
+  message("Reading: ", fname, " (year: ", year, ")")
+
+  # Read first sheet
+  df <- read_excel(xlsx_file[1], sheet = 1, col_types = "text") |>
+    clean_names()
+
+  message("  Columns found: ", paste(names(df), collapse = ", "))
+
+  # Check that occ_code exists — if not, skip this file
+ if (!"occ_code" %in% names(df)) {
+    message("  WARNING: occ_code not found, skipping this file")
+    return(NULL)
+  }
+
+  # We only need a handful of columns
+  cols_we_want <- c("occ_code", "occ_title", "tot_emp",
+                     "a_mean", "a_median",
+                     "a_pct10", "a_pct25", "a_pct75", "a_pct90",
+                     "h_mean", "h_median")
+
+  # Keep only columns that exist in this vintage
+  cols_available <- intersect(cols_we_want, names(df))
+
+  df <- df |>
+    select(all_of(cols_available)) |>
+    filter(occ_code %in% target_socs) |>
+    mutate(year = year)
+
+  # Coerce numeric columns
+  numeric_cols <- setdiff(cols_available, c("occ_code", "occ_title"))
+  df <- df |>
+    mutate(across(all_of(numeric_cols), ~ {
+      x <- str_remove_all(.x, ",")
+      x <- na_if(x, "**")
+      x <- na_if(x, "#")
+      x <- na_if(x, "*")
+      as.numeric(x)
+    }))
+
+  message("  Found ", nrow(df), " target occupations")
+  return(df)
+}
+
+# Loop through all folders and stack
+oews_raw <- map(oews_folders, read_oews) |>
+  bind_rows() |>
+  arrange(occ_code, year)
+
+# Join with our crosswalk
+oews <- oews_raw |>
+  left_join(soc_crosswalk, by = c("occ_code" = "soc_code")) |>
+  select(year, shrs_program, shrs_dept, occ_code, occ_title = occupation_title,
+         tot_emp, a_mean, a_median,
+         a_pct10, a_pct25, a_pct75, a_pct90,
+         h_mean, h_median)
+```
+
+### Quick Check: OEWS Coverage
+
+```{r oews-check}
+oews |>
+  group_by(shrs_program, occ_code) |>
+  summarise(
+    years_covered = n(),
+    year_min      = min(year),
+    year_max      = max(year),
+    .groups       = "drop"
+  )
+```
+
+### Preview
+
+```{r oews-preview}
+oews |>
+  select(year, shrs_program, tot_emp, a_median) |>
+  pivot_wider(names_from = year, values_from = c(tot_emp, a_median))
+```
+
+---
+
+# 3 — BLS Employment Projections (Multiple Cycles)
+
+Each projection cycle lives in its own subfolder as `occupation.xlsx` (archived
+ZIPs) or as a loose file in the `projections/` folder (latest cycle). The data
+we need is always in **Table 1.2**.
+
+```{r projections-load}
+# Find all occupation.xlsx files across the projections folder tree
+proj_files <- list.files(PROJ_PATH, pattern = "occupation\\.xlsx$",
+                          recursive = TRUE, full.names = TRUE,
+                          ignore.case = TRUE)
+
+# Helper: read Table 1.2 from one projection file
+read_projection <- function(file_path) {
+
+  # Read Table 1.2, skipping the title row (row 1 is title, row 2 is header)
+  df <- read_excel(file_path, sheet = "Table 1.2", skip = 1,
+                   col_types = "text") |>
+    clean_names()
+
+  # The first two columns are always title and SOC code, but column names
+
+  # vary by cycle. Identify them by position.
+  col_names <- names(df)
+
+  # Rename the first columns to consistent names
+  names(df)[1] <- "occupation_title"
+  names(df)[2] <- "soc_code"
+  names(df)[3] <- "occupation_type"
+
+  # Identify the base and projected year from the column names
+  # e.g. "employment_2024" and "employment_2034"
+  emp_cols <- str_subset(col_names, "^employment_\\d{4}$|^employment_20")
+  year_nums <- str_extract_all(paste(col_names, collapse = " "), "20\\d{2}") |>
+    unlist() |>
+    unique() |>
+    as.integer() |>
+    sort()
+
+  # First year = base, last year = projected
+  base_year <- year_nums[1]
+  proj_year <- year_nums[length(year_nums)]
+
+  # Grab the employment and change columns by position
+  # Positions 4 and 5 are always base and projected employment
+  names(df)[4] <- "emp_base"
+  names(df)[5] <- "emp_projected"
+
+  # Look for percent change column
+  pct_change_col <- str_which(col_names, "change.*percent|percent.*change")
+  if (length(pct_change_col) > 0) {
+    # Take the last one that matches (often the percent change, not numeric)
+    names(df)[pct_change_col[length(pct_change_col)]] <- "emp_change_pct"
+  }
+
+  # Look for openings column
+  openings_col <- str_which(col_names, "openings")
+  if (length(openings_col) > 0) {
+    names(df)[openings_col[1]] <- "annual_openings"
+  }
+
+  # Look for median wage column
+  wage_col <- str_which(col_names, "median.*wage|wage.*median")
+  if (length(wage_col) > 0) {
+    names(df)[wage_col[1]] <- "median_wage"
+  }
+
+  # Look for education column
+  edu_col <- str_which(col_names, "education")
+  if (length(edu_col) > 0) {
+    names(df)[edu_col[1]] <- "typical_education"
+  }
+
+  # Select and filter
+  available <- intersect(
+    c("occupation_title", "soc_code", "occupation_type",
+      "emp_base", "emp_projected", "emp_change_pct",
+      "annual_openings", "median_wage", "typical_education"),
+    names(df)
+  )
+
+  df <- df |>
+    select(all_of(available)) |>
+    filter(soc_code %in% target_socs,
+           occupation_type == "Line item") |>
+    mutate(
+      base_year = base_year,
+      proj_year = proj_year,
+      cycle     = paste0(base_year, "-", proj_year)
+    )
+
+  # Coerce numerics
+  numeric_cols <- intersect(c("emp_base", "emp_projected", "emp_change_pct",
+                                "annual_openings", "median_wage"), available)
+  df <- df |>
+    mutate(across(all_of(numeric_cols), ~ {
+      x <- str_remove_all(.x, ",")
+      x <- na_if(x, "—")
+      x <- na_if(x, "--")
+      as.numeric(x)
+    }))
+
+  return(df)
+}
+
+# Loop through all projection files
+projections_raw <- map(proj_files, possibly(read_projection, otherwise = NULL)) |>
+  compact() |>
+  bind_rows() |>
+  arrange(soc_code, base_year)
+
+# Join with crosswalk
+projections <- projections_raw |>
+  left_join(soc_crosswalk, by = "soc_code") |>
+  select(cycle, base_year, proj_year, shrs_program, shrs_dept,
+         soc_code, occ_title = occupation_title.y,
+         emp_base, emp_projected, emp_change_pct,
+         any_of(c("annual_openings", "median_wage", "typical_education")))
+```
+
+### Quick Check: Projection Cycles Loaded
+
+```{r proj-check}
+projections |>
+  group_by(cycle) |>
+  summarise(
+    n_occupations = n(),
+    soc_codes     = paste(unique(soc_code), collapse = ", "),
+    .groups       = "drop"
+  )
+```
+
+### Preview: Latest Cycle
+
+```{r proj-preview}
+projections |>
+  filter(base_year == max(base_year)) |>
+  select(shrs_program, cycle, emp_base, emp_projected,
+         emp_change_pct, annual_openings, median_wage)
+```
+
+---
+
+# 4 — Separations & Openings (Latest Cycle Only)
+
+Table 1.10 from the latest projections file breaks down job openings into
+growth, labor force exits, and occupational transfers.
+
+```{r separations-load}
+# Use the latest projection file (the one with the highest base year)
+latest_proj_file <- proj_files[which.max(
+  str_extract(proj_files, "\\d{4}") |> as.integer()
+)]
+
+# If the loose file in the root of projections/ exists, prefer that
+root_file <- file.path(PROJ_PATH, "occupation.xlsx")
+if (file.exists(root_file)) latest_proj_file <- root_file
+
+separations <- read_excel(latest_proj_file, sheet = "Table 1.10", skip = 1,
+                           col_types = "text") |>
+  clean_names()
+
+# Rename columns by position — these are stable across vintages
+names(separations)[1] <- "occupation_title"
+names(separations)[2] <- "soc_code"
+names(separations)[3] <- "occupation_type"
+names(separations)[4] <- "emp_base"
+names(separations)[5] <- "emp_projected"
+names(separations)[6] <- "emp_change_numeric"
+names(separations)[7] <- "emp_change_pct"
+names(separations)[8] <- "lf_exit_rate"
+names(separations)[9] <- "occ_transfer_rate"
+names(separations)[10] <- "total_sep_rate"
+names(separations)[11] <- "lf_exits"
+names(separations)[12] <- "occ_transfers"
+names(separations)[13] <- "total_separations"
+names(separations)[14] <- "annual_openings"
+
+separations <- separations |>
+  filter(soc_code %in% target_socs,
+         occupation_type == "Line item") |>
+  mutate(across(-c(occupation_title, soc_code, occupation_type), ~ {
+    x <- str_remove_all(.x, ",")
+    x <- na_if(x, "—")
+    as.numeric(x)
+  })) |>
+  left_join(soc_crosswalk, by = "soc_code")
+```
+
+```{r separations-preview}
+separations |>
+  select(shrs_program, soc_code, lf_exit_rate, occ_transfer_rate,
+         total_sep_rate, annual_openings)
+```
+
+---
+
+# 5 — Labor Force Projections
+
+Overall labor force growth gives us a benchmark for contextualising
+occupation-specific growth.
+
+```{r labor-force-load}
+labor_force <- read_excel(LABOR_FORCE_PATH, sheet = "Table 3.1", skip = 1,
+                           col_types = "text") |>
+  clean_names() |>
+  slice(1) |>                      # first row = "Total, 16 years and older"
+  mutate(across(-1, ~ as.numeric(str_remove_all(.x, ","))))
+
+# Extract the key numbers
+lf_summary <- tibble(
+  metric = c("Labor Force 2004 (thousands)",
+             "Labor Force 2014 (thousands)",
+             "Labor Force 2024 (thousands)",
+             "Labor Force 2034 (thousands)",
+             "Growth 2014-24 (%)",
+             "Growth 2024-34 (%)"),
+  value  = c(
+    as.numeric(labor_force[[2]]),
+    as.numeric(labor_force[[3]]),
+    as.numeric(labor_force[[4]]),
+    as.numeric(labor_force[[5]]),
+    as.numeric(labor_force[[10]]),
+    as.numeric(labor_force[[11]])
+  )
+)
+
+lf_growth_2024_2034 <- as.numeric(labor_force[[11]])  # percent change
+```
+
+```{r lf-preview}
+lf_summary
+```
+
+---
+
+# 6 — Aggregate Economy
+
+GDP growth and productivity context.
+
+```{r agg-econ-load}
+agg_econ <- read_excel(AGG_ECON_PATH, sheet = "Table 4.1", skip = 1,
+                        col_types = "text") |>
+  clean_names()
+
+# Pull key rows
+agg_summary <- agg_econ |>
+  filter(str_detect(category,
+    regex("total population|civilian labor force$|gdp|productivity",
+          ignore_case = TRUE))) |>
+  mutate(across(-category, ~ as.numeric(str_remove_all(.x, ","))))
+```
+
+```{r agg-preview}
+agg_summary
+```
+
+---
+
+# 7 — Industry Employment
+
+Which industries are growing? Healthcare & social assistance is the big one
+for SHRS programs.
+
+```{r industry-load}
+industry <- read_excel(INDUSTRY_PATH, sheet = "Table 2.1", skip = 1,
+                        col_types = "text") |>
+  clean_names()
+
+# Clean up
+industry <- industry |>
+  mutate(across(-1, ~ as.numeric(str_remove_all(.x, ","))))
+```
+
+```{r industry-preview}
+industry |> head(15)
+```
+
+---
+
+# 8 — All-Occupations Benchmark
+
+We also pull the "Total, all occupations" row from the latest projections
+to benchmark our SHRS occupations against.
+
+```{r benchmark}
+all_occ_benchmark <- read_excel(
+  latest_proj_file, sheet = "Table 1.2", skip = 1, col_types = "text"
+) |>
+  clean_names() |>
+  slice(1) |>                      # "Total, all occupations"
+  mutate(across(everything(), ~ {
+    x <- str_remove_all(.x, ",")
+    x <- na_if(x, "—")
+    x
+  }))
+
+# Extract the growth rate for all occupations
+# Column names vary, but it is always the percent change column
+col_names_bench <- names(all_occ_benchmark)
+pct_col <- str_which(col_names_bench, "change.*percent|percent.*change")
+all_occ_growth_pct <- as.numeric(all_occ_benchmark[[pct_col[length(pct_col)]]])
+```
+
+```{r benchmark-preview}
+cat("All-occupations projected growth (latest cycle):",
+    all_occ_growth_pct, "%\n")
+cat("Labor force projected growth 2024-34:",
+    lf_growth_2024_2034, "%\n")
+```
+
+---
+
+# Summary
+
+All data is now loaded and cleaned in memory. The key objects available for
+analysis in `market_02_analysis.Rmd` are:
+
+| Object | Description |
+|---|---|
+| `oews` | Historical employment & wages by SOC, 2014–2024 |
+| `projections` | BLS 10-year projections across multiple cycles |
+| `separations` | Job openings breakdown (latest cycle) |
+| `labor_force` / `lf_summary` | Overall labor force projections |
+| `agg_econ` / `agg_summary` | GDP and macro context |
+| `industry` | Industry employment projections |
+| `soc_crosswalk` | SHRS program ↔ SOC code mapping |
+| `all_occ_growth_pct` | Benchmark growth rate for all occupations |
+| `lf_growth_2024_2034` | Benchmark labor force growth rate |
