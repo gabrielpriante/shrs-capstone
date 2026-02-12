@@ -88,7 +88,7 @@ oews_folders <- list.dirs(OEWS_PATH, recursive = FALSE)
 # Helper: read one OEWS file and return a tidy tibble
 read_oews <- function(folder_path) {
   # Find the xlsx file inside the folder
-  xlsx_file <- list.files(folder_path, pattern = "\\.xlsx$",
+  xlsx_file <- list.files(folder_path, pattern = "national.*\\.xlsx$",
                           full.names = TRUE, ignore.case = TRUE)
 
   if (length(xlsx_file) == 0) {
