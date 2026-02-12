@@ -1,0 +1,840 @@
+---
+title: "SHRS Market Analysis — BLS Employment Analysis (v2.1)"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+# 0 — Load Prepared Data
+
+This file sources `market_01_data_prep.Rmd` to load all cleaned BLS data into
+memory. Make sure File 1 is in the same directory as this file.
+
+```{r source-prep}
+source(knitr::purl("market_01_data_prep.Rmd", output = tempfile(), quiet = TRUE))
+```
+
+```{r extra-packages}
+library(scales)
+library(tidyverse)
+library(kableExtra)
+```
+
+---
+
+# 1 — Historical Employment Trends (OEWS 2019–2024)
+
+How has employment in SHRS-related occupations changed over the past several
+years? Are these fields growing, shrinking, or stagnant?
+
+## 1.1 Employment Over Time
+
+```{r emp-trends-plot, fig.height=10}
+oews |>
+  ggplot(aes(x = year, y = tot_emp, color = shrs_program)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  facet_wrap(~ shrs_program, scales = "free_y", ncol = 3) +
+  scale_y_continuous(labels = comma) +
+  scale_x_continuous(breaks = unique(oews$year)) +
+  labs(
+    title    = "National Employment Trends by SHRS Occupation",
+    subtitle = "Source: BLS Occupational Employment and Wage Statistics (OEWS)",
+    x = NULL, y = "Total Employment"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 1.2 Employment Growth Summary
+
+```{r emp-growth-table}
+emp_growth <- oews |>
+  group_by(shrs_program, occ_title) |>
+  summarise(
+    emp_first_year = first(tot_emp),
+    emp_last_year  = last(tot_emp),
+    year_start     = min(year),
+    year_end       = max(year),
+    abs_change     = last(tot_emp) - first(tot_emp),
+    pct_change     = round((last(tot_emp) / first(tot_emp) - 1) * 100, 1),
+    .groups        = "drop"
+  ) |>
+  arrange(desc(pct_change))
+
+emp_growth |>
+  select(Program = shrs_program, Occupation = occ_title,
+         `Start Emp` = emp_first_year, `End Emp` = emp_last_year,
+         `Change` = abs_change, `Growth (%)` = pct_change) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 1.3 Wage Trends
+
+```{r wage-trends-plot, fig.height=10}
+oews |>
+  ggplot(aes(x = year, y = a_median, color = shrs_program)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  facet_wrap(~ shrs_program, scales = "free_y", ncol = 3) +
+  scale_y_continuous(labels = dollar) +
+  scale_x_continuous(breaks = unique(oews$year)) +
+  labs(
+    title    = "Median Annual Wage Trends by SHRS Occupation",
+    subtitle = "Source: BLS OEWS",
+    x = NULL, y = "Median Annual Wage"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 1.4 Wage Comparison Across Programs (Latest Year)
+
+```{r wage-comparison}
+latest_year <- max(oews$year)
+
+oews |>
+  filter(year == latest_year) |>
+  ggplot(aes(x = reorder(shrs_program, a_median), y = a_median, fill = shrs_dept)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = dollar(a_median)), hjust = -0.1, size = 4) +
+  coord_flip() +
+  scale_y_continuous(labels = dollar, expand = expansion(mult = c(0, 0.2))) +
+  labs(
+    title    = paste0("Median Annual Wage by SHRS Occupation (", latest_year, ")"),
+    subtitle = "Source: BLS OEWS",
+    x = NULL, y = "Median Annual Wage", fill = "Department"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+---
+
+# 2 — BLS Employment Projections Across Cycles
+
+## 2.1 Projected Growth Rate by Cycle
+
+```{r proj-cycle-plot, fig.height=10}
+projections |>
+  ggplot(aes(x = cycle, y = emp_change_pct, fill = shrs_program)) +
+  geom_col(position = "dodge", width = 0.7) +
+  geom_hline(yintercept = all_occ_growth_pct, linetype = "dashed",
+             color = "gray40", linewidth = 0.7) +
+  annotate("text", x = 1, y = all_occ_growth_pct + 1,
+           label = paste0("All occupations: ", all_occ_growth_pct, "%"),
+           hjust = 0, size = 3.5, color = "gray40") +
+  facet_wrap(~ shrs_program, ncol = 3, scales = "free_y") +
+  labs(
+    title    = "BLS Projected Employment Growth (%) Across Projection Cycles",
+    subtitle = "Dashed line = all-occupations benchmark from latest cycle",
+    x = "Projection Cycle", y = "Projected Growth (%)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 2.2 Projections Summary Table (Latest Cycle)
+
+```{r proj-latest-table}
+proj_latest <- projections |>
+  filter(base_year == max(base_year))
+
+proj_latest |>
+  mutate(
+    vs_benchmark = round(emp_change_pct - all_occ_growth_pct, 1),
+    signal = case_when(
+      emp_change_pct >= all_occ_growth_pct * 2 ~ "Strong Growth",
+      emp_change_pct >= all_occ_growth_pct     ~ "Above Average",
+      emp_change_pct >= 0                       ~ "Below Average",
+      TRUE                                      ~ "Declining"
+    )
+  ) |>
+  select(Program = shrs_program, Cycle = cycle,
+         `Base Emp (000s)` = emp_base, `Proj Emp (000s)` = emp_projected,
+         `Growth (%)` = emp_change_pct, `vs All Occ (pp)` = vs_benchmark,
+         Signal = signal, `Openings/yr (000s)` = annual_openings,
+         `Median Wage` = median_wage) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 3 — Job Openings & Separations
+
+Job openings come from two sources: **growth** (new positions created) and
+**replacement** (people leaving through retirement, career changes, etc.).
+Even slow-growth occupations can have strong demand if turnover is high.
+
+```{r separations-chart, fig.height=7}
+sep_long <- separations |>
+  select(shrs_program, lf_exits, occ_transfers, emp_change_numeric) |>
+  rename(`Labor Force Exits` = lf_exits,
+         `Occupational Transfers` = occ_transfers,
+         `Growth` = emp_change_numeric) |>
+  pivot_longer(-shrs_program, names_to = "component", values_to = "value")
+
+sep_long |>
+  ggplot(aes(x = reorder(shrs_program, value, sum), y = value, fill = component)) +
+  geom_col(width = 0.6) +
+  coord_flip() +
+  scale_fill_manual(values = c("Growth" = "#2c7bb6",
+                                "Labor Force Exits" = "#d7191c",
+                                "Occupational Transfers" = "#fdae61")) +
+  labs(title = "Components of Annual Job Openings by SHRS Occupation",
+       subtitle = "Latest BLS projection cycle (thousands per year)",
+       x = NULL, y = "Annual Openings (thousands)", fill = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+```{r separations-table}
+separations |>
+  select(Program = shrs_program, `Exit Rate (%)` = lf_exit_rate,
+         `Transfer Rate (%)` = occ_transfer_rate,
+         `Total Sep Rate (%)` = total_sep_rate,
+         `Annual Openings (000s)` = annual_openings) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 4 — Macro Context & Benchmarking
+
+## 4.1 Growth Benchmarking
+
+```{r benchmark-chart, fig.height=7}
+benchmark_df <- proj_latest |>
+  select(shrs_program, emp_change_pct) |>
+  bind_rows(
+    tibble(shrs_program = "All Occupations", emp_change_pct = all_occ_growth_pct),
+    tibble(shrs_program = "Labor Force", emp_change_pct = lf_growth_2024_2034)
+  ) |>
+  mutate(is_benchmark = shrs_program %in% c("All Occupations", "Labor Force"),
+         fill_color = if_else(is_benchmark, "Benchmark", "SHRS Program"))
+
+benchmark_df |>
+  ggplot(aes(x = reorder(shrs_program, emp_change_pct),
+             y = emp_change_pct, fill = fill_color)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(emp_change_pct, "%")), hjust = -0.1, size = 4) +
+  coord_flip() +
+  scale_fill_manual(values = c("SHRS Program" = "#2c7bb6", "Benchmark" = "#cccccc")) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.2))) +
+  labs(title = "Projected Employment Growth: SHRS Occupations vs Benchmarks",
+       subtitle = paste0("Latest BLS cycle (", proj_latest$cycle[1], ")"),
+       x = NULL, y = "Projected Growth (%)", fill = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+## 4.2 Healthcare Industry Context
+
+```{r industry-context}
+healthcare_row <- industry |>
+  filter(str_detect(industry_sector, regex("health care|healthcare", ignore_case = TRUE)))
+
+if (nrow(healthcare_row) > 0) {
+  ind_cols <- names(industry)
+  emp_cols <- str_which(ind_cols, "employment")
+  healthcare_summary <- healthcare_row |>
+    select(industry_sector, all_of(ind_cols[emp_cols]))
+  healthcare_summary |>
+    kable(format.args = list(big.mark = ",")) |>
+    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+}
+```
+
+## 4.3 Labor Force Overview
+
+```{r lf-table}
+lf_summary |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 5 — Education Premium Analysis
+
+How does the education level required for SHRS occupations relate to earnings
+and employment stability? This contextualises the value proposition of each
+program's degree.
+
+## 5.1 The Education Premium Curve
+
+```{r edu-premium-curve, fig.height=6}
+edu_order <- c("Less than a high school diploma", "High school diploma",
+               "Some college, no degree", "Associate's degree",
+               "Bachelor's degree", "Master's degree",
+               "Professional degree", "Doctoral degree")
+
+edu_premium_plot <- edu_premium |>
+  mutate(edu_level = factor(edu_level, levels = edu_order))
+
+pitt_to_bls_edu <- tribble(
+  ~pitt_degree_group,  ~bls_edu_label,
+  "Master's",          "Master's degree",
+  "Doctoral",          "Doctoral degree"
+)
+
+program_edu_tiers <- soc_crosswalk |>
+  select(shrs_program, pitt_degree) |>
+  mutate(pitt_degree_group = case_when(
+    str_detect(pitt_degree, "Doctoral|Post-Professional") ~ "Doctoral",
+    TRUE ~ "Master's"
+  )) |>
+  left_join(pitt_to_bls_edu, by = "pitt_degree_group") |>
+  distinct(bls_edu_label)
+
+edu_premium_plot |>
+  filter(!is.na(edu_level)) |>
+  ggplot(aes(x = edu_level, y = median_annual_earnings)) +
+  geom_col(aes(fill = edu_level %in% program_edu_tiers$bls_edu_label), width = 0.7) +
+  geom_text(aes(label = dollar(median_annual_earnings)), vjust = -0.3, size = 3.5) +
+  scale_fill_manual(values = c("FALSE" = "#cccccc", "TRUE" = "#2c7bb6"),
+                    labels = c("Other", "SHRS-relevant tiers"), name = NULL) +
+  scale_y_continuous(labels = dollar, expand = expansion(mult = c(0, 0.15))) +
+  labs(title = "Median Annual Earnings by Education Level (2024)",
+       subtitle = "Highlighted: education tiers that SHRS programs feed into",
+       x = NULL, y = "Median Annual Earnings") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 35, hjust = 1),
+        legend.position = "bottom")
+```
+
+## 5.2 Employment Growth by Education Tier
+
+```{r edu-growth-tiers, fig.height=5}
+edu_employment |>
+  filter(!is.na(emp_change_pct),
+         !str_detect(edu_level, regex("total", ignore_case = TRUE))) |>
+  mutate(is_shrs_tier = str_detect(edu_level,
+    regex("master|doctoral|professional", ignore_case = TRUE))) |>
+  ggplot(aes(x = reorder(edu_level, emp_change_pct),
+             y = emp_change_pct, fill = is_shrs_tier)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(emp_change_pct, "%")), hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_fill_manual(values = c("FALSE" = "#cccccc", "TRUE" = "#2c7bb6"),
+                    labels = c("Other", "SHRS-relevant"), name = NULL) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.2))) +
+  labs(title = "Projected Employment Growth by Entry-Level Education (2024–2034)",
+       subtitle = "Master's degree tier leads all categories in projected growth",
+       x = NULL, y = "Projected Growth (%)") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+## 5.3 Education Premium Summary for SHRS Tiers
+
+```{r edu-premium-table}
+# Table 5.1 and Table 5.2 use different education labels. Build crosswalk.
+# 5.1: "Doctoral degree", "Professional degree" (separate)
+# 5.2: "Doctoral or professional degree" (combined)
+edu_label_xwalk <- tribble(
+  ~edu_level_51,           ~edu_level_52,
+  "Doctoral degree",       "Doctoral or professional degree",
+  "Professional degree",   "Doctoral or professional degree",
+  "Master's degree",       "Master's degree",
+  "Bachelor's degree",     "Bachelor's degree"
+)
+
+edu_premium |>
+  filter(str_detect(edu_level,
+    regex("master|doctoral|professional|bachelor", ignore_case = TRUE))) |>
+  left_join(edu_label_xwalk, by = c("edu_level" = "edu_level_51")) |>
+  left_join(
+    edu_employment |> select(edu_level, emp_change_pct, median_wage),
+    by = c("edu_level_52" = "edu_level")
+  ) |>
+  select(`Education Level` = edu_level,
+         `Weekly Earnings` = median_weekly_earnings,
+         `Annual Earnings` = median_annual_earnings,
+         `Unemployment (%)` = unemployment_rate,
+         `Proj Growth (%)` = emp_change_pct,
+         `Median Occ Wage` = median_wage) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 6 — Credential Alignment Analysis
+
+Does the degree Pitt confers match what the labor market expects? We compare
+three things for each program:
+
+1. **Pitt's degree level** (what we award)
+2. **BLS typical entry requirement** (Table 5.4 — what the field officially requires)
+3. **Actual workforce education distribution** (Table 5.3 — what workers actually hold)
+
+## 6.1 Credential Alignment Table
+
+```{r credential-alignment}
+edu_req_dedup <- edu_requirements_shrs |>
+  distinct(soc_code, .keep_all = TRUE) |>
+  select(soc_code, bls_entry_education = typical_entry_education, ojt = ojt_required)
+
+edu_att_dedup <- edu_attainment_shrs |>
+  distinct(soc_code, .keep_all = TRUE) |>
+  select(soc_code, bachelors, masters, doctoral)
+
+credential_alignment <- soc_crosswalk |>
+  select(shrs_program, shrs_dept, soc_code, pitt_degree) |>
+  left_join(edu_req_dedup, by = "soc_code") |>
+  left_join(edu_att_dedup, by = "soc_code") |>
+  mutate(
+    pitt_degree_group = case_when(
+      str_detect(pitt_degree, "Doctoral|Post-Professional") ~ "doctoral",
+      TRUE ~ "masters"
+    ),
+    workforce_pct_at_pitt_level = case_when(
+      pitt_degree_group == "doctoral" ~ doctoral,
+      pitt_degree_group == "masters"  ~ masters,
+      TRUE ~ NA_real_
+    ),
+    bls_requires_group = case_when(
+      str_detect(bls_entry_education, regex("doctoral|professional", ignore_case = TRUE)) ~ "doctoral",
+      str_detect(bls_entry_education, regex("master", ignore_case = TRUE)) ~ "masters",
+      str_detect(bls_entry_education, regex("bachelor", ignore_case = TRUE)) ~ "bachelors",
+      TRUE ~ "other"
+    ),
+    credential_match = case_when(
+      pitt_degree_group == bls_requires_group ~ "Aligned",
+      pitt_degree_group == "doctoral" & bls_requires_group == "masters" ~ "Above Required",
+      pitt_degree_group == "masters" & bls_requires_group == "bachelors" ~ "Above Required",
+      pitt_degree_group == "masters" & bls_requires_group == "doctoral" ~ "Below Required",
+      pitt_degree_group == "masters" & bls_requires_group == "other" ~ "Above Required",
+      TRUE ~ "Review"
+    )
+  )
+```
+
+```{r credential-table}
+credential_alignment |>
+  select(Program = shrs_program, Dept = shrs_dept,
+         `Pitt Awards` = pitt_degree, `BLS Requires` = bls_entry_education,
+         `Match` = credential_match,
+         `% Workforce at Pitt Level` = workforce_pct_at_pitt_level,
+         `% Bachelor's` = bachelors, `% Master's` = masters,
+         `% Doctoral+` = doctoral) |>
+  kable(digits = 1) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 6.2 Credential Alignment Visualization
+
+```{r credential-viz, fig.height=8, fig.width=10}
+cred_long <- credential_alignment |>
+  select(shrs_program, bachelors, masters, doctoral) |>
+  pivot_longer(-shrs_program, names_to = "degree_level", values_to = "pct") |>
+  mutate(degree_level = factor(degree_level,
+    levels = c("bachelors", "masters", "doctoral"),
+    labels = c("Bachelor's", "Master's", "Doctoral+")))
+
+pitt_markers <- credential_alignment |>
+  select(shrs_program, pitt_degree_group, workforce_pct_at_pitt_level) |>
+  mutate(degree_level = factor(
+    case_when(pitt_degree_group == "doctoral" ~ "Doctoral+", TRUE ~ "Master's"),
+    levels = c("Bachelor's", "Master's", "Doctoral+")))
+
+cred_long |>
+  ggplot(aes(x = degree_level, y = pct, fill = degree_level)) +
+  geom_col(width = 0.6) +
+  geom_point(data = pitt_markers,
+             aes(x = degree_level, y = workforce_pct_at_pitt_level),
+             shape = 18, size = 5, color = "red", inherit.aes = FALSE) +
+  facet_wrap(~ shrs_program, ncol = 3) +
+  scale_fill_manual(values = c("Bachelor's" = "#fdae61",
+                                "Master's" = "#2c7bb6",
+                                "Doctoral+" = "#1a9641")) +
+  labs(title = "Workforce Education Distribution by SHRS Occupation",
+       subtitle = "Red diamond = degree level Pitt awards (Table 5.3, 2022–23 CPS)",
+       x = NULL, y = "% of Workers", fill = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+## 6.3 Credential Alignment Scoring
+
+```{r credential-scoring}
+credential_scores <- credential_alignment |>
+  mutate(
+    credential_score = case_when(
+      credential_match == "Aligned" & workforce_pct_at_pitt_level >= 60 ~ 5,
+      credential_match == "Aligned" & workforce_pct_at_pitt_level >= 40 ~ 4,
+      credential_match == "Aligned" ~ 3,
+      credential_match == "Above Required" & workforce_pct_at_pitt_level >= 30 ~ 3,
+      credential_match == "Above Required" ~ 2,
+      credential_match == "Below Required" ~ 1,
+      TRUE ~ 0
+    )
+  )
+
+credential_scores |>
+  select(Program = shrs_program, `Pitt Awards` = pitt_degree,
+         `BLS Requires` = bls_entry_education,
+         `Match Status` = credential_match,
+         `Workforce %` = workforce_pct_at_pitt_level,
+         `Score (0-5)` = credential_score) |>
+  arrange(desc(`Score (0-5)`)) |>
+  kable(digits = 1) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 7 — Industry Presence Analysis
+
+This section examines SHRS occupations within **one specific industry slice**:
+NAICS 621990 (All Other Miscellaneous Ambulatory Health Care Services). This is
+a relatively small industry (187K total jobs in 2024), so most SHRS occupations
+have minimal presence here. The value of this analysis is understanding which
+occupations *are* present and how the broader ambulatory care sector is growing.
+
+For the overall healthcare industry context (22.5 million jobs, 8.7% projected
+growth), see Section 4.2 above.
+
+## 7.1 SHRS Occupations in Ambulatory Care (NAICS 621990)
+
+```{r ind-presence, results='asis'}
+if (nrow(ind_matrix_shrs) > 0) {
+  cat("*Note: Employment figures are in thousands. Most SHRS occupations have*
+*small presence in this specific sub-industry, reflecting industry diversification —*
+*SHRS graduates work across many sectors.*\n\n")
+
+  ind_matrix_shrs |>
+    select(Program = shrs_program, Occupation = occupation_title,
+           `2024 Emp (000s)` = x2024_employment,
+           `2034 Proj (000s)` = projected_2034_employment,
+           `Growth (%)` = employment_percent_change_2024_2034,
+           `% of Industry` = x2024_percent_of_industry,
+           `% of Occupation` = x2024_percent_of_occupation) |>
+    kable(digits = 1) |>
+    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+    cat()
+} else {
+  cat("No SHRS occupations found in this industry matrix.\n")
+}
+```
+
+## 7.2 Industry Concentration Context
+
+```{r ind-context, fig.height=5}
+if (nrow(ind_matrix_shrs) > 0) {
+  ind_matrix_shrs |>
+    ggplot(aes(x = reorder(shrs_program, x2024_percent_of_occupation),
+               y = x2024_percent_of_occupation)) +
+    geom_col(fill = "#2c7bb6", width = 0.6) +
+    geom_text(aes(label = paste0(round(x2024_percent_of_occupation, 1), "%")),
+              hjust = -0.1, size = 4) +
+    coord_flip() +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.3))) +
+    labs(title = "Share of Occupation in Ambulatory Care (NAICS 621990)",
+         subtitle = "What % of each occupation's total national employment is in this sub-industry",
+         x = NULL, y = "% of Total Occupation Employment") +
+    theme_minimal(base_size = 13)
+}
+```
+
+## 7.3 Industry Diversification
+
+```{r ind-missing, results='asis'}
+missing_programs <- soc_crosswalk |>
+  filter(soc_code %in% socs_missing) |>
+  select(Program = shrs_program, Occupation = occupation_title, `SOC Code` = soc_code)
+
+if (nrow(missing_programs) > 0) {
+  cat("The following SHRS occupations are **not present** in NAICS 621990.
+This indicates these occupations are distributed across other industries
+(education, hospitals, physician offices, sports organizations, etc.).
+Industry diversification is generally a positive signal for employment stability.\n\n")
+
+  missing_programs |>
+    kable() |>
+    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+    cat()
+}
+```
+
+## 7.4 Top Growing Occupations in Ambulatory Care
+
+For context, what are the fastest-growing occupations in this industry
+alongside SHRS programs?
+
+```{r ind-top-growth, fig.height=6}
+ind_matrix |>
+  filter(occupation_type == "Line Item",
+         !is.na(employment_percent_change_2024_2034)) |>
+  slice_max(employment_percent_change_2024_2034, n = 15) |>
+  mutate(
+    is_shrs = occupation_code %in% target_socs,
+    label = if_else(is_shrs, paste0(occupation_title, " *"), occupation_title)
+  ) |>
+  ggplot(aes(x = reorder(label, employment_percent_change_2024_2034),
+             y = employment_percent_change_2024_2034, fill = is_shrs)) +
+  geom_col(width = 0.6) +
+  coord_flip() +
+  scale_fill_manual(values = c("FALSE" = "#cccccc", "TRUE" = "#2c7bb6"),
+                    labels = c("Other", "SHRS"), name = NULL) +
+  labs(title = "Top 15 Fastest-Growing Occupations in NAICS 621990",
+       subtitle = "SHRS-related occupations marked with asterisk",
+       x = NULL, y = "Projected Growth 2024-2034 (%)") +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "bottom")
+```
+
+---
+
+# 8 — Program-Level Market Demand Scorecard
+
+This is the synthesis: for each SHRS program, we combine historical trends,
+forward projections, wage levels, job openings, and credential alignment into
+an overall market demand assessment.
+
+**Scoring: 6 dimensions, normalized to a 0–100 scale** for intuitive
+interpretation. Raw composite is out of 20, then scaled to 100.
+
+```{r scorecard-v21}
+# Education premium scores
+edu_premium_scores <- credential_alignment |>
+  mutate(
+    edu_premium_score = case_when(
+      pitt_degree_group == "doctoral" ~ 3,
+      pitt_degree_group == "masters"  ~ 2,
+      TRUE                            ~ 1
+    )
+  ) |>
+  select(shrs_program, edu_premium_score)
+
+# Build scorecard components
+proj_for_scorecard <- proj_latest |>
+  select(soc_code, emp_change_pct, annual_openings, median_wage) |>
+  distinct(soc_code, .keep_all = TRUE)
+
+sep_for_scorecard <- separations |>
+  select(soc_code, total_sep_rate) |>
+  distinct(soc_code, .keep_all = TRUE)
+
+growth_for_scorecard <- emp_growth |>
+  left_join(soc_crosswalk |> select(shrs_program, soc_code), by = "shrs_program") |>
+  select(soc_code, historical_growth_pct = pct_change) |>
+  distinct(soc_code, .keep_all = TRUE)
+
+scorecard <- soc_crosswalk |>
+  select(shrs_program, shrs_dept, soc_code) |>
+  left_join(proj_for_scorecard, by = "soc_code") |>
+  left_join(growth_for_scorecard, by = "soc_code") |>
+  left_join(sep_for_scorecard, by = "soc_code") |>
+  left_join(credential_scores |> select(shrs_program, credential_score, credential_match),
+            by = "shrs_program") |>
+  left_join(edu_premium_scores, by = "shrs_program") |>
+  mutate(
+    # Dimension 1: Projected Growth (0-3)
+    growth_score = case_when(
+      emp_change_pct >= all_occ_growth_pct * 2 ~ 3,
+      emp_change_pct >= all_occ_growth_pct     ~ 2,
+      emp_change_pct >= 0                       ~ 1,
+      TRUE                                      ~ 0
+    ),
+    # Dimension 2: Wage Level (0-3)
+    wage_score = case_when(
+      median_wage >= 90000 ~ 3,
+      median_wage >= 60000 ~ 2,
+      median_wage >= 40000 ~ 1,
+      TRUE                 ~ 0
+    ),
+    # Dimension 3: Annual Openings (0-3)
+    openings_score = case_when(
+      annual_openings >= 10 ~ 3,
+      annual_openings >= 3  ~ 2,
+      annual_openings >= 1  ~ 1,
+      TRUE                  ~ 0
+    ),
+    # Dimension 4: Replacement Demand (0-3)
+    turnover_score = case_when(
+      total_sep_rate >= 6 ~ 3,
+      total_sep_rate >= 4 ~ 2,
+      total_sep_rate >= 2 ~ 1,
+      TRUE                ~ 0
+    ),
+    # Dimensions 5-6: credential_score (0-5) and edu_premium_score (0-3)
+    # Raw composite (max 20)
+    raw_score = growth_score + wage_score + openings_score +
+                turnover_score + credential_score + edu_premium_score,
+    # Scaled to 0-100
+    composite_score = round(raw_score / 20 * 100),
+    # Signal based on 0-100 scale
+    market_signal = case_when(
+      composite_score >= 80 ~ "Strong",
+      composite_score >= 60 ~ "Favorable",
+      composite_score >= 40 ~ "Moderate",
+      composite_score >= 20 ~ "Weak",
+      TRUE                  ~ "Critical"
+    )
+  )
+```
+
+## 8.1 Scorecard Table
+
+```{r scorecard-table}
+scorecard |>
+  select(Program = shrs_program, Dept = shrs_dept,
+         `Hist Growth (%)` = historical_growth_pct,
+         `Proj Growth (%)` = emp_change_pct,
+         `Median Wage` = median_wage,
+         `Openings/yr (000s)` = annual_openings,
+         `Sep Rate (%)` = total_sep_rate,
+         `Cred Match` = credential_match,
+         `Score (0-100)` = composite_score,
+         Signal = market_signal) |>
+  arrange(desc(`Score (0-100)`)) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 8.2 Scorecard Decomposition
+
+```{r scorecard-viz, fig.height=8}
+scorecard |>
+  transmute(shrs_program,
+    `Growth (0-3)` = growth_score,
+    `Wage (0-3)` = wage_score,
+    `Openings (0-3)` = openings_score,
+    `Replacement (0-3)` = turnover_score,
+    `Credential (0-5)` = credential_score,
+    `Edu Premium (0-3)` = edu_premium_score) |>
+  pivot_longer(-shrs_program, names_to = "dimension", values_to = "score") |>
+  mutate(max_score = case_when(str_detect(dimension, "0-5") ~ 5, TRUE ~ 3)) |>
+  ggplot(aes(x = dimension, y = score, fill = dimension)) +
+  geom_col(width = 0.7) +
+  facet_wrap(~ shrs_program, ncol = 3) +
+  scale_y_continuous(limits = c(0, 5), breaks = 0:5) +
+  labs(title = "Market Demand Scorecard Decomposition by SHRS Program",
+       subtitle = "Each dimension scored individually; composite normalized to 0-100",
+       x = NULL, y = "Score") +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 55, hjust = 1))
+```
+
+## 8.3 Dashboard-Ready Color Signal
+
+This maps each program to the red-yellow-green color spectrum that will drive
+the final Program Health Dashboard.
+
+```{r dashboard-colors, fig.height=5, fig.width=8}
+scorecard |>
+  ggplot(aes(x = reorder(shrs_program, composite_score),
+             y = composite_score, fill = composite_score / 100)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(composite_score, "/100")), hjust = -0.1, size = 4) +
+  coord_flip() +
+  scale_fill_gradientn(
+    colors = c("#d73027", "#fdae61", "#fee08b", "#a6d96a", "#1a9641"),
+    values = c(0, 0.25, 0.5, 0.75, 1),
+    limits = c(0, 1), name = "Health\nSignal") +
+  scale_y_continuous(limits = c(0, 115), expand = expansion(mult = c(0, 0))) +
+  labs(title = "Program Market Health Signal — Dashboard Preview",
+       subtitle = "Red-to-Green | Based on 6-dimension composite (0-100 scale)",
+       x = NULL, y = "Composite Market Score (0-100)") +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "right")
+```
+
+---
+
+# 9 — Key Takeaways
+
+```{r takeaways, results='asis'}
+for (i in seq_len(nrow(scorecard))) {
+  row <- scorecard[i, ]
+  cat(paste0("\n## ", row$shrs_program, " — ", row$market_signal, "\n\n"))
+  cat(paste0("- **Projected growth**: ", row$emp_change_pct,
+             "% (vs ", all_occ_growth_pct, "% all occupations)\n"))
+  if (!is.na(row$historical_growth_pct)) {
+    cat(paste0("- **Historical growth**: ", row$historical_growth_pct,
+               "% (OEWS ", min(oews$year), "-", max(oews$year), ")\n"))
+  }
+  cat(paste0("- **Median wage**: $", format(row$median_wage, big.mark = ","), "\n"))
+  cat(paste0("- **Annual openings**: ",
+             format(row$annual_openings * 1000, big.mark = ","), "\n"))
+  if (!is.na(row$total_sep_rate)) {
+    cat(paste0("- **Separation rate**: ", row$total_sep_rate, "%\n"))
+  }
+  cat(paste0("- **Credential alignment**: ", row$credential_match,
+             " (score: ", row$credential_score, "/5)\n"))
+  cat(paste0("- **Composite score**: ", row$composite_score, "/100\n\n"))
+}
+```
+
+---
+
+# Appendix: Data Sources & Methodology
+
+**Data Sources:**
+
+- BLS Occupational Employment and Wage Statistics (OEWS), `r min(oews$year)`-`r max(oews$year)`
+- BLS Employment Projections, multiple cycles through `r proj_latest$cycle[1]`
+- BLS Labor Force Projections, 2024-2034
+- BLS Aggregate Economy Tables, 2024-2034
+- BLS Industry Employment Projections, 2024-2034
+- BLS Education & Training Data (Tables 5.1-5.4), 2024
+- BLS National Employment Matrix, NAICS 621990, 2024-2034
+
+**Scorecard Methodology (v2.1):**
+
+Six dimensions, raw max = 20, **normalized to 0-100 scale**:
+
+| Dimension | 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|---|
+| Projected Growth | Declining | 0-`r all_occ_growth_pct`% | `r all_occ_growth_pct`-`r all_occ_growth_pct*2`% | >`r all_occ_growth_pct*2`% | — | — |
+| Wage Level | <$40K | $40-60K | $60-90K | >$90K | — | — |
+| Annual Openings | <1K | 1-3K | 3-10K | >10K | — | — |
+| Replacement Demand | <2% | 2-4% | 4-6% | >6% | — | — |
+| Education Premium | Other | — | Master's tier | Doctoral tier | — | — |
+| Credential Alignment | Review | Below Req | Above (low %) | Above/Aligned (med %) | Aligned (high %) | Perfect |
+
+**Dashboard Color Mapping:**
+
+| Score Range | Color | Signal |
+|---|---|---|
+| 80-100 | Dark Green | Strong |
+| 60-79 | Light Green | Favorable |
+| 40-59 | Yellow | Moderate |
+| 20-39 | Orange | Weak |
+| 0-19 | Red | Critical |
+
+**Known Limitations:**
+
+1. OEWS historical data coverage varies by occupation (some SOC codes are newer)
+2. Employment figures in projections are in thousands; OEWS figures are counts
+3. Industry matrix covers only NAICS 621990 (a small sub-industry); additional matrices needed for full diversification analysis
+4. Table 5.3 education data is from 2022-23, not 2024
+5. Table 5.1 and Table 5.2 use different education tier labels; the crosswalk in Section 5.3 handles this
+6. Scorecard thresholds should be validated with SHRS leadership
+7. SS (Exercise Physiologists) has a smaller employment base (~8K) which can amplify percentage changes
+8. HIM credential alignment is flagged because BLS lists Associate's as entry level, but Pitt awards a Master's — may reflect field evolution
+9. DN is flagged similarly (BLS lists Bachelor's, Pitt awards Master's)
