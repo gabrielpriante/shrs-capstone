@@ -12,6 +12,10 @@
 #   skills_01_analysis.Rmd in an interactive Shiny dashboard.
 #   Sources market_01_data_prep.Rmd for all data loading.
 #
+# v2.2 — Vital Signs banner + Top/Bottom 5 skill toggles
+#   Task A: 4-tile KPI banner on Scorecard tab (data-driven, no empty boxes)
+#   Task B: Full / Top 5 / Bottom 5 toggle on BLS Skills & O*NET Skills tabs
+#
 # TO RUN: Click "Run App" in RStudio
 # =============================================================================
 
@@ -23,7 +27,7 @@ library(scales)
 library(DT)
 library(plotly)
 library(bslib)
-library(knitr)
+
 
 # =============================================================================
 # DATA LOADING — sources your existing pipeline
@@ -270,17 +274,46 @@ ui <- page_navbar(
     .navbar{border-bottom:3px solid #FFB81C}
     .card{border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
     .card-header{font-weight:600}
+
+    /* ── Task A: Vital Signs KPI banner ─────────────────────────── */
+    .kpi-row{display:flex;gap:12px;margin-bottom:16px}
+    .kpi-tile{flex:1;border-radius:10px;padding:16px 20px;text-align:center;
+      box-shadow:0 2px 8px rgba(0,0,0,.1);min-height:100px;
+      display:flex;flex-direction:column;justify-content:center}
+    .kpi-tile .kpi-label{font-size:.82em;font-weight:600;text-transform:uppercase;
+      letter-spacing:.4px;opacity:.85;margin-bottom:4px}
+    .kpi-tile .kpi-value{font-size:1.8em;font-weight:800;line-height:1.15}
+    .kpi-tile .kpi-sub{font-size:.78em;opacity:.7;margin-top:2px}
+    .kpi-navy{background:#003594;color:#fff}
+    .kpi-gold{background:#FFB81C;color:#003594}
+    .kpi-green{background:#1a9641;color:#fff}
+    .kpi-gray{background:#6c757d;color:#fff}
+    .kpi-red{background:#c0392b;color:#fff}
+
+    /* ── Task B: Skill toggle buttons ─────────────────────────── */
+    .skill-controls{background:#f8f9fa;border-radius:8px;padding:14px 18px;
+      margin-bottom:14px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+    .skill-controls label{font-weight:600;font-size:.95em;margin-bottom:0}
+    .skill-controls .btn-group-container-sw .btn,
+    .skill-controls .shiny-input-radiogroup label.radio-inline{
+      font-size:1em !important;padding:8px 18px !important;min-width:120px;
+      cursor:pointer}
+    .skill-controls .shiny-input-container{margin-bottom:0}
+    .skill-controls .form-select{min-width:140px;font-size:.95em}
   "))),
 
   # ═══════════════════════════════════════════════════════════════════════════
   # TAB 1: SCORECARD & OVERVIEW (market_02 Sections 8 + 4.1)
   # ═══════════════════════════════════════════════════════════════════════════
   nav_panel("Scorecard", icon=icon("dashboard"),
-    layout_columns(col_widths=c(3,3,3,3),
-      value_box("Programs",nrow(soc_crosswalk),showcase=icon("heartbeat"),theme="primary"),
-      value_box("OEWS Years",paste0(min(oews$year),"-",max(oews$year)),showcase=icon("calendar"),theme="info"),
-      value_box("Avg Growth",if(!is.null(scorecard))paste0(round(mean(scorecard$emp_change_pct,na.rm=TRUE),1),"%")else"-",showcase=icon("chart-line"),theme="success"),
-      value_box("Benchmark",paste0(all_occ_growth_pct,"%"),showcase=icon("balance-scale"),theme="secondary")),
+
+    # ── TASK A: Program Vital Signs KPI Banner ────────────────────────────────
+    # 4 large tiles matching the executive console design.
+    # All populated with real data from the existing pipeline (no empty boxes).
+    # To update later: swap uiOutput IDs with internal-data metrics.
+    uiOutput("kpi_banner"),
+
+    # ── Existing scorecard content (unchanged) ────────────────────────────────
     layout_columns(col_widths=c(7,5),
       card(card_header("8.1 — Scorecard Table (v2.1, 0-100)"), card_body(DTOutput("sc_table"))),
       card(card_header("8.3 — Health Signal (Red-to-Green)"), card_body(plotOutput("sc_signal",height="380px")))),
@@ -349,8 +382,21 @@ ui <- page_navbar(
   # TAB 6: BLS SKILLS (skills_01 Section 1)
   # ═══════════════════════════════════════════════════════════════════════════
   nav_panel("BLS Skills", icon=icon("brain"),
+
+    # ── TASK B: Skill view toggle (large, easy-to-click) ──────────────────────
+    tags$div(class="skill-controls",
+      tags$label("Heatmap View:"),
+      radioButtons("bls_view", NULL,
+        choices=c("Full Heatmap","Top 5 Skills","Bottom 5 Skills"),
+        selected="Full Heatmap", inline=TRUE),
+      conditionalPanel("input.bls_view !== 'Full Heatmap'",
+        selectInput("bls_focus", "Program:",
+          choices=sort(unique(soc_crosswalk_full$shrs_program)), selected="SLP", width="150px"))
+    ),
+
     layout_columns(col_widths=c(12),
-      card(card_header("1.1 — BLS Skill Heatmap (9 Programs)"), card_body(plotOutput("bls_heatmap",height="550px")))),
+      card(card_header(uiOutput("bls_heatmap_title")),
+           card_body(plotOutput("bls_heatmap", height="550px")))),
     layout_columns(col_widths=c(12),
       card(card_header("1.2 — Skill Profiles by Program"), card_body(plotOutput("bls_radar",height="750px")))),
     layout_columns(col_widths=c(6,6),
@@ -362,10 +408,23 @@ ui <- page_navbar(
   # TAB 7: O*NET SKILLS (skills_01 Section 2)
   # ═══════════════════════════════════════════════════════════════════════════
   nav_panel("O*NET Skills", icon=icon("cogs"),
+
+    # ── TASK B: Skill view toggle (same pattern as BLS) ───────────────────────
+    tags$div(class="skill-controls",
+      tags$label("Heatmap View:"),
+      radioButtons("onet_view", NULL,
+        choices=c("Full Heatmap","Top 5 Skills","Bottom 5 Skills"),
+        selected="Full Heatmap", inline=TRUE),
+      conditionalPanel("input.onet_view !== 'Full Heatmap'",
+        selectInput("onet_focus", "Program:",
+          choices=sort(unique(soc_crosswalk_full$shrs_program)), selected="SLP", width="150px"))
+    ),
+
     layout_columns(col_widths=c(12),
       card(card_header("2.1 — Top 10 Skills by Program (Importance)"), card_body(plotOutput("onet_top10",height="750px")))),
     layout_columns(col_widths=c(12),
-      card(card_header("2.2 — Full O*NET Skill Heatmap"), card_body(plotOutput("onet_heatmap",height="750px")))),
+      card(card_header(uiOutput("onet_heatmap_title")),
+           card_body(plotOutput("onet_heatmap", height="750px")))),
     layout_columns(col_widths=c(6,6),
       card(card_header("2.3 — Skill Clusters (Bar)"), card_body(plotOutput("onet_cluster_bar",height="400px"))),
       card(card_header("2.3 — Skill Cluster Heatmap"), card_body(plotOutput("onet_cluster_heat",height="350px"))))
@@ -406,6 +465,81 @@ ui <- page_navbar(
 # =============================================================================
 
 server <- function(input, output, session) {
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TASK A: KPI Vital Signs Banner
+  # 4 data-driven tiles — no empty boxes. Uses existing scorecard + projections.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  output$kpi_banner <- renderUI({
+    # Tile 1: Portfolio Market Alignment (avg composite score across programs)
+    if (!is.null(scorecard) && nrow(scorecard) > 0) {
+      avg_composite <- round(mean(scorecard$composite_score, na.rm = TRUE))
+      tile1_class <- if (avg_composite >= 60) "kpi-navy" else if (avg_composite >= 40) "kpi-gold" else "kpi-red"
+      tile1 <- tags$div(class = paste("kpi-tile", tile1_class),
+        tags$div(class = "kpi-label", "Portfolio Market Alignment"),
+        tags$div(class = "kpi-value", paste0(avg_composite, "%")),
+        tags$div(class = "kpi-sub", paste0("Avg across ", nrow(scorecard), " programs (0-100 scale)")))
+    } else {
+      tile1 <- tags$div(class = "kpi-tile kpi-gray",
+        tags$div(class = "kpi-label", "Portfolio Market Alignment"),
+        tags$div(class = "kpi-value", "—"),
+        tags$div(class = "kpi-sub", "Scorecard not yet computed"))
+    }
+
+    # Tile 2: Total Market Openings (sum of annual openings × 10 for decade)
+    if (!is.null(scorecard) && "annual_openings" %in% names(scorecard)) {
+      total_openings <- round(sum(scorecard$annual_openings, na.rm = TRUE) * 10)
+      tile2 <- tags$div(class = "kpi-tile kpi-gold",
+        tags$div(class = "kpi-label", "Total Market Openings (10yr)"),
+        tags$div(class = "kpi-value", paste0(total_openings, "k ", "\u2191")),
+        tags$div(class = "kpi-sub", "Projected openings across all SHRS occupations"))
+    } else {
+      tile2 <- tags$div(class = "kpi-tile kpi-gray",
+        tags$div(class = "kpi-label", "Total Market Openings"),
+        tags$div(class = "kpi-value", "—"),
+        tags$div(class = "kpi-sub", "No projection data"))
+    }
+
+    # Tile 3: Avg Program Margin — placeholder until internal data
+    # For now, show average projected growth as a proxy metric
+    if (!is.null(scorecard)) {
+      avg_growth <- round(mean(scorecard$emp_change_pct, na.rm = TRUE), 1)
+      tile3_class <- if (avg_growth >= all_occ_growth_pct) "kpi-green" else "kpi-gold"
+      tile3 <- tags$div(class = paste("kpi-tile", tile3_class),
+        tags$div(class = "kpi-label", "Avg Projected Growth"),
+        tags$div(class = "kpi-value", paste0("+", avg_growth, "%")),
+        tags$div(class = "kpi-sub", paste0("vs ", all_occ_growth_pct, "% all-occupation benchmark")))
+    } else {
+      tile3 <- tags$div(class = "kpi-tile kpi-gray",
+        tags$div(class = "kpi-label", "Avg Projected Growth"),
+        tags$div(class = "kpi-value", "—"),
+        tags$div(class = "kpi-sub", "Awaiting data"))
+    }
+
+    # Tile 4: Critical Action Required — count of Weak/Critical programs
+    if (!is.null(scorecard)) {
+      n_critical <- sum(scorecard$market_signal %in% c("Weak", "Critical"), na.rm = TRUE)
+      tile4_class <- if (n_critical == 0) "kpi-green" else if (n_critical <= 2) "kpi-gold" else "kpi-red"
+      tile4 <- tags$div(class = paste("kpi-tile", tile4_class),
+        tags$div(class = "kpi-label", "Action Required"),
+        tags$div(class = "kpi-value",
+          if (n_critical > 0) paste0(icon("triangle-exclamation"), " ", n_critical, " Programs")
+          else paste0(icon("check-circle"), " None")),
+        tags$div(class = "kpi-sub",
+          if (n_critical > 0) "Below-average market signal" else "All programs at or above average"))
+    } else {
+      tile4 <- tags$div(class = "kpi-tile kpi-gray",
+        tags$div(class = "kpi-label", "Action Required"),
+        tags$div(class = "kpi-value", "—"),
+        tags$div(class = "kpi-sub", "Pending scorecard"))
+    }
+
+    tags$div(class = "kpi-row", tile1, tile2, tile3, tile4)
+  })
+
+  # Number of skills for Top/Bottom views. Change this to adjust (e.g., 10).
+  N_SKILLS <- 5
 
   # ═══ TAB 1: SCORECARD ══════════════════════════════════════════════════════
 
@@ -654,15 +788,51 @@ server <- function(input, output, session) {
       theme_minimal(base_size=11) + theme(legend.position="bottom")
   })
 
-  # ═══ TAB 6: BLS SKILLS ═════════════════════════════════════════════════════
+  # ═══ TAB 6: BLS SKILLS (with Top/Bottom 5 toggle — Task B) ══════════════
+
+  # Dynamic card header
+  output$bls_heatmap_title <- renderUI({
+    mode <- input$bls_view %||% "Full Heatmap"
+    if (mode == "Full Heatmap") {
+      "1.1 — BLS Skill Heatmap (All Programs)"
+    } else {
+      paste0("1.1 — ", mode, " — ", input$bls_focus %||% "SLP")
+    }
+  })
 
   output$bls_heatmap <- renderPlot({
     req(bls_skills)
-    bls_skills |> ggplot(aes(x=shrs_program,y=reorder(skill,percentile),fill=percentile)) +
-      geom_tile(color="white",linewidth=.5) + geom_text(aes(label=percentile),size=2.8) +
-      scale_fill_gradient2(low="#d73027",mid="#fee08b",high="#1a9850",midpoint=50,limits=c(0,100),name="Percentile") +
-      labs(title="BLS Skill Percentile Ranks by SHRS Program",x=NULL,y=NULL) +
-      theme_minimal(base_size=12) + theme(axis.text.x=element_text(face="bold",angle=30,hjust=1),panel.grid=element_blank())
+    mode <- input$bls_view %||% "Full Heatmap"
+
+    if (mode == "Full Heatmap") {
+      # ── Original full heatmap (unchanged) ──
+      bls_skills |> ggplot(aes(x=shrs_program,y=reorder(skill,percentile),fill=percentile)) +
+        geom_tile(color="white",linewidth=.5) + geom_text(aes(label=percentile),size=2.8) +
+        scale_fill_gradient2(low="#d73027",mid="#fee08b",high="#1a9850",midpoint=50,limits=c(0,100),name="Percentile") +
+        labs(title="BLS Skill Percentile Ranks by SHRS Program",x=NULL,y=NULL) +
+        theme_minimal(base_size=12) + theme(axis.text.x=element_text(face="bold",angle=30,hjust=1),panel.grid=element_blank())
+    } else {
+      # ── Filtered Top/Bottom N view ──
+      prog <- input$bls_focus %||% "SLP"
+      df <- bls_skills |> filter(shrs_program == prog)
+      if (mode == "Top 5 Skills") {
+        df <- df |> slice_max(percentile, n = N_SKILLS)
+      } else {
+        df <- df |> slice_min(percentile, n = N_SKILLS)
+      }
+      title_lab <- paste0(mode, " (BLS) — ", prog)
+      df |>
+        ggplot(aes(x = reorder(skill, percentile), y = percentile, fill = percentile)) +
+        geom_col(width = 0.55) +
+        geom_text(aes(label = percentile), hjust = -0.15, size = 5, fontface = "bold") +
+        coord_flip() +
+        scale_fill_gradient2(low="#d73027",mid="#fee08b",high="#1a9850",midpoint=50,limits=c(0,100)) +
+        scale_y_continuous(limits = c(0, 110), expand = expansion(mult = c(0, 0))) +
+        labs(title = title_lab, x = NULL, y = "Percentile Rank (0–100)") +
+        theme_minimal(base_size = 15) +
+        theme(legend.position = "none",
+              plot.title = element_text(face = "bold", size = 16))
+    }
   })
 
   output$bls_radar <- renderPlot({
@@ -693,7 +863,17 @@ server <- function(input, output, session) {
       datatable(options=list(dom='t',pageLength=50),rownames=FALSE,class="compact stripe")
   })
 
-  # ═══ TAB 7: O*NET SKILLS ═══════════════════════════════════════════════════
+  # ═══ TAB 7: O*NET SKILLS (with Top/Bottom 5 toggle — Task B) ════════════
+
+  # Dynamic card header
+  output$onet_heatmap_title <- renderUI({
+    mode <- input$onet_view %||% "Full Heatmap"
+    if (mode == "Full Heatmap") {
+      "2.2 — Full O*NET Skill Heatmap"
+    } else {
+      paste0("2.2 — ", mode, " — ", input$onet_focus %||% "SLP")
+    }
+  })
 
   output$onet_top10 <- renderPlot({
     req(onet_skills)
@@ -707,11 +887,37 @@ server <- function(input, output, session) {
 
   output$onet_heatmap <- renderPlot({
     req(onet_skills)
-    onet_skills |> ggplot(aes(x=shrs_program,y=reorder(skill,importance),fill=importance)) +
-      geom_tile(color="white",linewidth=.2) + geom_text(aes(label=round(importance,1)),size=2.5) +
-      scale_fill_gradient2(low="#d73027",mid="#fee08b",high="#1a9850",midpoint=2.5,limits=c(1,5),name="Imp") +
-      labs(title="O*NET Skill Importance",x=NULL,y=NULL) +
-      theme_minimal(base_size=11) + theme(axis.text.x=element_text(face="bold",angle=30,hjust=1),panel.grid=element_blank())
+    mode <- input$onet_view %||% "Full Heatmap"
+
+    if (mode == "Full Heatmap") {
+      # ── Original full heatmap (unchanged) ──
+      onet_skills |> ggplot(aes(x=shrs_program,y=reorder(skill,importance),fill=importance)) +
+        geom_tile(color="white",linewidth=.2) + geom_text(aes(label=round(importance,1)),size=2.5) +
+        scale_fill_gradient2(low="#d73027",mid="#fee08b",high="#1a9850",midpoint=2.5,limits=c(1,5),name="Imp") +
+        labs(title="O*NET Skill Importance",x=NULL,y=NULL) +
+        theme_minimal(base_size=11) + theme(axis.text.x=element_text(face="bold",angle=30,hjust=1),panel.grid=element_blank())
+    } else {
+      # ── Filtered Top/Bottom N view ──
+      prog <- input$onet_focus %||% "SLP"
+      df <- onet_skills |> filter(shrs_program == prog)
+      if (mode == "Top 5 Skills") {
+        df <- df |> slice_max(importance, n = N_SKILLS)
+      } else {
+        df <- df |> slice_min(importance, n = N_SKILLS)
+      }
+      title_lab <- paste0(mode, " (O*NET) — ", prog)
+      df |>
+        ggplot(aes(x = reorder(skill, importance), y = importance, fill = importance)) +
+        geom_col(width = 0.55) +
+        geom_text(aes(label = round(importance, 1)), hjust = -0.15, size = 5, fontface = "bold") +
+        coord_flip() +
+        scale_fill_gradient2(low="#d73027",mid="#fee08b",high="#1a9850",midpoint=2.5,limits=c(1,5)) +
+        scale_y_continuous(limits = c(0, 5.5), expand = expansion(mult = c(0, 0))) +
+        labs(title = title_lab, x = NULL, y = "Importance (1–5 scale)") +
+        theme_minimal(base_size = 15) +
+        theme(legend.position = "none",
+              plot.title = element_text(face = "bold", size = 16))
+    }
   })
 
   output$onet_cluster_bar <- renderPlot({
