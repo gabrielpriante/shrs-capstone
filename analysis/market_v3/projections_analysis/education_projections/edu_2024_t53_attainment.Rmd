@@ -1,0 +1,437 @@
+---
+title: "SHRS Education Analysis — 2024 Workforce Attainment (Table 5.3)"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+```{r packages}
+library(tidyverse)
+library(scales)
+library(knitr)
+library(kableExtra)
+```
+
+# 0 — Configuration
+
+```{r config}
+# ── EDIT THIS PATH ──
+CSV_PATH <- file.path(path.expand("~"), "Documents", "SHRS_Analysis",
+                       "market_analysis", "v3data", "projections_csv",
+                       "education_csv", "2024", "education - Table 5.3.csv")
+
+# 9-program crosswalk
+soc_xwalk <- tribble(
+  ~shrs_program, ~shrs_dept, ~soc_code,
+  "SLP", "CSD", "29-1127",
+  "AuD", "CSD", "29-1181",
+  "HIM", "HIM", "29-9021",
+  "OTD", "RST", "29-1122",
+  "DPT", "RST", "29-1123",
+  "PAS", "PAS", "29-1071",
+  "AT",  "SMN", "29-9091",
+  "DN",  "SMN", "29-1031",
+  "SS",  "SMN", "29-1128"
+)
+
+target_socs <- soc_xwalk$soc_code
+
+# Education levels low → high
+edu_levels <- c(
+  "Less than high school diploma",
+  "High school diploma or equivalent",
+  "Some college, no degree",
+  "Associate's degree",
+  "Bachelor's degree",
+  "Master's degree",
+  "Doctoral or professional degree"
+)
+
+# Colors
+program_colors <- c(
+  "SLP" = "#2c7bb6", "AuD" = "#abd9e9", "HIM" = "#8e44ad",
+  "OTD" = "#e67e22", "DPT" = "#16a085", "PAS" = "#c0392b",
+  "AT"  = "#fdae61", "DN"  = "#d7191c", "SS"  = "#1a9641"
+)
+signal_colors <- c("Green" = "#27ae60", "Yellow" = "#f39c12", "Red" = "#e74c3c")
+```
+
+---
+
+# 1 — Load & Clean
+
+```{r load}
+raw <- read_csv(CSV_PATH, show_col_types = FALSE)
+
+# Standardize column names
+names(raw)[1] <- "occ_title"
+names(raw)[2] <- "soc_code"
+names(raw)[3] <- "less_than_hs"
+names(raw)[4] <- "hs_diploma"
+names(raw)[5] <- "some_college"
+names(raw)[6] <- "associates"
+names(raw)[7] <- "bachelors"
+names(raw)[8] <- "masters"
+names(raw)[9] <- "doctoral"
+
+# Clean
+raw <- raw |>
+  mutate(
+    soc_code  = str_trim(soc_code),
+    occ_title = str_remove_all(occ_title, "\\[\\d+\\]") |> str_trim()
+  )
+
+# Extract all-occupations benchmark row
+benchmark_row <- raw |> filter(soc_code == "00-0000")
+
+# Filter to SHRS targets
+shrs_wide <- raw |>
+  filter(soc_code %in% target_socs) |>
+  left_join(soc_xwalk, by = "soc_code")
+
+# Pivot long for plotting
+shrs_long <- shrs_wide |>
+  pivot_longer(
+    cols = c(less_than_hs, hs_diploma, some_college, associates,
+             bachelors, masters, doctoral),
+    names_to = "edu_col", values_to = "pct"
+  ) |>
+  mutate(
+    pct = as.numeric(pct),
+    edu_level = case_when(
+      edu_col == "less_than_hs" ~ "Less than high school diploma",
+      edu_col == "hs_diploma"   ~ "High school diploma or equivalent",
+      edu_col == "some_college" ~ "Some college, no degree",
+      edu_col == "associates"   ~ "Associate's degree",
+      edu_col == "bachelors"    ~ "Bachelor's degree",
+      edu_col == "masters"      ~ "Master's degree",
+      edu_col == "doctoral"     ~ "Doctoral or professional degree"
+    ),
+    edu_level = factor(edu_level, levels = edu_levels)
+  )
+
+# Benchmark long
+bench_long <- benchmark_row |>
+  pivot_longer(
+    cols = c(less_than_hs, hs_diploma, some_college, associates,
+             bachelors, masters, doctoral),
+    names_to = "edu_col", values_to = "pct"
+  ) |>
+  mutate(
+    pct = as.numeric(pct),
+    edu_level = case_when(
+      edu_col == "less_than_hs" ~ "Less than high school diploma",
+      edu_col == "hs_diploma"   ~ "High school diploma or equivalent",
+      edu_col == "some_college" ~ "Some college, no degree",
+      edu_col == "associates"   ~ "Associate's degree",
+      edu_col == "bachelors"    ~ "Bachelor's degree",
+      edu_col == "masters"      ~ "Master's degree",
+      edu_col == "doctoral"     ~ "Doctoral or professional degree"
+    ),
+    edu_level = factor(edu_level, levels = edu_levels)
+  )
+```
+
+### Data Quality Check
+
+```{r dq-check, results='asis'}
+# Verify all 9 programs loaded
+n_found <- nrow(shrs_wide)
+cat(paste0("**Programs found:** ", n_found, " of 9\n\n"))
+
+# Check AT/HIM duplication
+at_vals <- shrs_wide |> filter(soc_code == "29-9091") |>
+  select(less_than_hs:doctoral) |> as.numeric()
+him_vals <- shrs_wide |> filter(soc_code == "29-9021") |>
+  select(less_than_hs:doctoral) |> as.numeric()
+if (identical(at_vals, him_vals)) {
+  cat("> **Note:** AT (29-9091) and HIM (29-9021) have identical education ",
+      "distributions in this table. BLS uses a shared broader-group estimate ",
+      "(footnote [1] in source). Interpret with caution.\n")
+}
+
+# Check all rows sum to ~100%
+row_sums <- shrs_long |>
+  group_by(shrs_program) |>
+  summarise(total = sum(pct, na.rm = TRUE), .groups = "drop")
+
+cat(paste0("\n**Row sums (should be ~100):** ",
+           paste(row_sums$shrs_program, "=", round(row_sums$total, 1),
+                 collapse = ", "), "\n"))
+```
+
+---
+
+# 2 — Workforce Education Distribution
+
+## 2.1 Stacked Distribution
+
+```{r dist-stacked, fig.height=7}
+shrs_long |>
+  ggplot(aes(x = factor(shrs_program, levels = soc_xwalk$shrs_program),
+             y = pct, fill = edu_level)) +
+  geom_col(width = 0.7) +
+  scale_fill_viridis_d(option = "D", direction = -1, name = "Education Level") +
+  labs(
+    title = "Workforce Educational Attainment by SHRS Occupation (2024)",
+    subtitle = "Percent of workers 25+ at each education level — BLS Table 5.3",
+    x = NULL, y = "Percent of Workers (%)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+## 2.2 Wide Summary Table
+
+```{r dist-table}
+shrs_wide |>
+  select(Program = shrs_program, Dept = shrs_dept,
+         `< HS` = less_than_hs, `HS` = hs_diploma,
+         `Some Col` = some_college, `Assoc` = associates,
+         `Bach` = bachelors, `Master` = masters,
+         `Doct` = doctoral) |>
+  arrange(factor(Program, levels = soc_xwalk$shrs_program)) |>
+  kable(digits = 1,
+        caption = "Education Attainment Distribution (% of Workers 25+, 2024)") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 3 — Graduate-Degree Concentration
+
+```{r grad-concentration}
+grad_share_2024 <- shrs_wide |>
+  mutate(grad_pct = as.numeric(masters) + as.numeric(doctoral)) |>
+  select(shrs_program, shrs_dept, soc_code, grad_pct)
+
+all_occ_grad_2024 <- as.numeric(benchmark_row$masters) +
+                     as.numeric(benchmark_row$doctoral)
+
+grad_share_2024 <- grad_share_2024 |>
+  mutate(
+    benchmark = all_occ_grad_2024,
+    ratio_to_benchmark = round(grad_pct / all_occ_grad_2024, 2)
+  )
+```
+
+```{r grad-chart, fig.height=5}
+grad_share_2024 |>
+  ggplot(aes(x = reorder(shrs_program, grad_pct), y = grad_pct,
+             fill = shrs_program)) +
+  geom_col(width = 0.6) +
+  geom_hline(yintercept = all_occ_grad_2024, linetype = "dashed",
+             color = "gray40", linewidth = 0.7) +
+  annotate("text", x = 1.5, y = all_occ_grad_2024 + 2,
+           label = paste0("All occupations: ", all_occ_grad_2024, "%"),
+           size = 3.5, color = "gray40") +
+  geom_text(aes(label = paste0(round(grad_pct, 1), "%")),
+            hjust = -0.1, size = 3.8) +
+  coord_flip() +
+  scale_fill_manual(values = program_colors) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Graduate-Degree Concentration by SHRS Occupation (2024)",
+    subtitle = "% of workforce holding Master's or Doctoral degree",
+    x = NULL, y = "% with Graduate Degree"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+```{r grad-table}
+grad_share_2024 |>
+  select(Program = shrs_program, `Grad %` = grad_pct,
+         `All Occ Benchmark` = benchmark,
+         `Ratio to Benchmark` = ratio_to_benchmark) |>
+  arrange(desc(`Grad %`)) |>
+  kable(digits = 1,
+        caption = "Graduate Degree Concentration vs All-Occupations Benchmark") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 4 — Dominant Education Level (Workforce Mode)
+
+```{r dominant-edu}
+dominant_edu_2024 <- shrs_long |>
+  group_by(shrs_program, shrs_dept, soc_code) |>
+  slice_max(pct, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  select(shrs_program, shrs_dept, soc_code,
+         dominant_edu = edu_level, dominant_pct = pct)
+
+dominant_edu_2024 |>
+  select(Program = shrs_program, Dept = shrs_dept,
+         `Most Common Education` = dominant_edu,
+         `% of Workforce` = dominant_pct) |>
+  arrange(factor(Program, levels = soc_xwalk$shrs_program)) |>
+  kable(digits = 1,
+        caption = "Most Common Education Level in Workforce (2024)") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 5 — Comparison to All-Occupations Benchmark
+
+How does each SHRS occupation's education profile differ from the economy-wide
+distribution?
+
+```{r vs-benchmark, fig.height=8}
+# Compute difference from benchmark for each level
+bench_lookup <- bench_long |> select(edu_level, bench_pct = pct)
+
+diff_from_bench <- shrs_long |>
+  left_join(bench_lookup, by = "edu_level") |>
+  mutate(diff_pp = pct - bench_pct)
+
+diff_from_bench |>
+  ggplot(aes(x = edu_level, y = diff_pp, fill = diff_pp > 0)) +
+  geom_col(width = 0.6) +
+  geom_hline(yintercept = 0, color = "gray30") +
+  facet_wrap(~ shrs_program, ncol = 3) +
+  scale_fill_manual(values = c("TRUE" = "#27ae60", "FALSE" = "#e74c3c"),
+                    guide = "none") +
+  labs(
+    title = "Education Attainment: SHRS vs All Occupations (2024)",
+    subtitle = "Percentage point difference from economy-wide distribution",
+    x = NULL, y = "Difference (pp)"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 7))
+```
+
+---
+
+# 6 — Attainment Scorecard (0–100)
+
+Three dimensions scored 0–100, capturing how concentrated, graduate-heavy,
+and specialized each occupation's workforce is.
+
+| Dimension | Formula | Interpretation |
+|---|---|---|
+| Graduate Intensity | min(grad_pct / benchmark * 50, 100) | Higher = more graduate-heavy vs economy |
+| Education Concentration | dominant_pct | Higher = more homogeneous workforce |
+| Sub-Bachelor Control | 100 - (less_hs + hs + some_college) | Higher = fewer workers below Bachelor's |
+
+```{r attain-scorecard}
+attain_scorecard_2024 <- shrs_wide |>
+  mutate(
+    grad_pct = as.numeric(masters) + as.numeric(doctoral),
+    sub_bach_pct = as.numeric(less_than_hs) + as.numeric(hs_diploma) +
+                   as.numeric(some_college)
+  ) |>
+  left_join(dominant_edu_2024 |> select(shrs_program, dominant_pct),
+            by = "shrs_program") |>
+  mutate(
+    d1_grad_intensity = round(pmin(grad_pct / all_occ_grad_2024 * 50, 100), 1),
+    d2_concentration  = round(dominant_pct, 1),
+    d3_sub_bach_ctrl  = round(100 - sub_bach_pct, 1),
+    composite = round((d1_grad_intensity + d2_concentration + d3_sub_bach_ctrl) / 3, 1),
+    signal = case_when(
+      composite >= 70 ~ "Green",
+      composite >= 50 ~ "Yellow",
+      TRUE            ~ "Red"
+    )
+  )
+```
+
+```{r attain-scorecard-table}
+attain_ordered <- attain_scorecard_2024 |> arrange(desc(composite))
+
+attain_ordered |>
+  select(Program = shrs_program, Dept = shrs_dept,
+         `Grad Intensity` = d1_grad_intensity,
+         Concentration = d2_concentration,
+         `Sub-Bach Ctrl` = d3_sub_bach_ctrl,
+         Composite = composite,
+         Signal = signal) |>
+  kable(digits = 1,
+        caption = "Workforce Attainment Scorecard (0-100, 2024)") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  column_spec(7, color = "white",
+              background = ifelse(attain_ordered$signal == "Green", "#27ae60",
+                           ifelse(attain_ordered$signal == "Yellow", "#f39c12",
+                                  "#e74c3c")))
+```
+
+```{r attain-rank, fig.height=5}
+attain_scorecard_2024 |>
+  ggplot(aes(x = reorder(shrs_program, composite), y = composite,
+             fill = signal)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = composite), hjust = -0.1, size = 4) +
+  coord_flip() +
+  scale_fill_manual(values = signal_colors, name = "Signal") +
+  scale_y_continuous(limits = c(0, 105)) +
+  labs(
+    title = "Workforce Attainment Composite Score (2024)",
+    subtitle = "3-dimension average (0-100) | Green >= 70 | Yellow 50-69 | Red < 50",
+    x = NULL, y = "Composite Score"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+---
+
+# 7 — Stored Outputs
+
+```{r store}
+# All stored variables for downstream use
+t53_2024_shrs_wide       <- shrs_wide
+t53_2024_shrs_long       <- shrs_long
+t53_2024_benchmark       <- bench_long
+t53_2024_grad_share      <- grad_share_2024
+t53_2024_dominant_edu    <- dominant_edu_2024
+t53_2024_diff_benchmark  <- diff_from_bench
+t53_2024_scorecard       <- attain_scorecard_2024
+t53_2024_all_occ_grad    <- all_occ_grad_2024
+```
+
+```{r catalog, results='asis'}
+cat("| Variable | Description | Dimensions |\n")
+cat("|---|---|---|\n")
+cat(paste0("| `t53_2024_shrs_wide` | Wide-format attainment (9 programs x 7 levels) | ",
+           nrow(t53_2024_shrs_wide), " x ", ncol(t53_2024_shrs_wide), " |\n"))
+cat(paste0("| `t53_2024_shrs_long` | Long-format attainment for plotting | ",
+           nrow(t53_2024_shrs_long), " x ", ncol(t53_2024_shrs_long), " |\n"))
+cat(paste0("| `t53_2024_benchmark` | All-occupations benchmark (long) | ",
+           nrow(t53_2024_benchmark), " x ", ncol(t53_2024_benchmark), " |\n"))
+cat(paste0("| `t53_2024_grad_share` | Graduate concentration + ratio | ",
+           nrow(t53_2024_grad_share), " x ", ncol(t53_2024_grad_share), " |\n"))
+cat(paste0("| `t53_2024_dominant_edu` | Workforce mode per program | ",
+           nrow(t53_2024_dominant_edu), " x ", ncol(t53_2024_dominant_edu), " |\n"))
+cat(paste0("| `t53_2024_diff_benchmark` | Difference from all-occ by level | ",
+           nrow(t53_2024_diff_benchmark), " x ", ncol(t53_2024_diff_benchmark), " |\n"))
+cat(paste0("| `t53_2024_scorecard` | 3-dim attainment scorecard (0-100) | ",
+           nrow(t53_2024_scorecard), " x ", ncol(t53_2024_scorecard), " |\n"))
+cat("| `t53_2024_all_occ_grad` | All-occ graduate % benchmark (scalar) | 1 |\n")
+```
+
+---
+
+# Appendix
+
+**Source:** BLS Employment Projections, Table 5.3 — Educational attainment
+for workers age 25 and older by detailed occupation, 2024 vintage.
+
+**Known limitation:** AT (29-9091) and HIM (29-9021) share identical distributions
+(BLS broader-group estimate).

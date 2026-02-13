@@ -1,0 +1,308 @@
+---
+title: "SHRS Education Analysis — 2021 Workforce Attainment (Table 5.3)"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+```{r packages}
+library(tidyverse)
+library(scales)
+library(knitr)
+library(kableExtra)
+```
+
+# 0 — Configuration
+
+```{r config}
+VINTAGE <- 2021
+
+CSV_PATH <- file.path(path.expand("~"), "Documents", "SHRS_Analysis",
+                       "market_analysis", "v3data", "projections_csv",
+                       "education_csv", as.character(VINTAGE),
+                       paste0("education_", VINTAGE, " - Table 5.3.csv"))
+
+soc_xwalk <- tribble(
+  ~shrs_program, ~shrs_dept, ~soc_code,
+  "SLP", "CSD", "29-1127",
+  "AuD", "CSD", "29-1181",
+  "HIM", "HIM", "29-9021",
+  "OTD", "RST", "29-1122",
+  "DPT", "RST", "29-1123",
+  "PAS", "PAS", "29-1071",
+  "AT",  "SMN", "29-9091",
+  "DN",  "SMN", "29-1031",
+  "SS",  "SMN", "29-1128"
+)
+
+target_socs <- soc_xwalk$soc_code
+
+edu_levels <- c(
+  "Less than high school diploma",
+  "High school diploma or equivalent",
+  "Some college, no degree",
+  "Associate's degree",
+  "Bachelor's degree",
+  "Master's degree",
+  "Doctoral or professional degree"
+)
+
+program_colors <- c(
+  "SLP" = "#2c7bb6", "AuD" = "#abd9e9", "HIM" = "#8e44ad",
+  "OTD" = "#e67e22", "DPT" = "#16a085", "PAS" = "#c0392b",
+  "AT"  = "#fdae61", "DN"  = "#d7191c", "SS"  = "#1a9641"
+)
+signal_colors <- c("Green" = "#27ae60", "Yellow" = "#f39c12", "Red" = "#e74c3c")
+```
+
+# 1 — Load & Clean
+
+```{r load}
+raw <- read_csv(CSV_PATH, show_col_types = FALSE)
+
+names(raw)[1] <- "occ_title"
+names(raw)[2] <- "soc_code"
+names(raw)[3] <- "less_than_hs"
+names(raw)[4] <- "hs_diploma"
+names(raw)[5] <- "some_college"
+names(raw)[6] <- "associates"
+names(raw)[7] <- "bachelors"
+names(raw)[8] <- "masters"
+names(raw)[9] <- "doctoral"
+
+raw <- raw |>
+  mutate(
+    soc_code  = str_trim(soc_code),
+    occ_title = str_remove_all(occ_title, "\\(\\d+\\)|\\[\\d+\\]") |> str_trim()
+  )
+
+benchmark_row <- raw |> filter(soc_code == "00-0000")
+
+shrs_wide <- raw |>
+  filter(soc_code %in% target_socs) |>
+  left_join(soc_xwalk, by = "soc_code")
+
+shrs_long <- shrs_wide |>
+  pivot_longer(
+    cols = c(less_than_hs, hs_diploma, some_college, associates,
+             bachelors, masters, doctoral),
+    names_to = "edu_col", values_to = "pct"
+  ) |>
+  mutate(
+    pct = as.numeric(pct),
+    edu_level = case_when(
+      edu_col == "less_than_hs" ~ "Less than high school diploma",
+      edu_col == "hs_diploma"   ~ "High school diploma or equivalent",
+      edu_col == "some_college" ~ "Some college, no degree",
+      edu_col == "associates"   ~ "Associate's degree",
+      edu_col == "bachelors"    ~ "Bachelor's degree",
+      edu_col == "masters"      ~ "Master's degree",
+      edu_col == "doctoral"     ~ "Doctoral or professional degree"
+    ),
+    edu_level = factor(edu_level, levels = edu_levels)
+  )
+
+bench_long <- benchmark_row |>
+  pivot_longer(
+    cols = c(less_than_hs, hs_diploma, some_college, associates,
+             bachelors, masters, doctoral),
+    names_to = "edu_col", values_to = "pct"
+  ) |>
+  mutate(
+    pct = as.numeric(pct),
+    edu_level = case_when(
+      edu_col == "less_than_hs" ~ "Less than high school diploma",
+      edu_col == "hs_diploma"   ~ "High school diploma or equivalent",
+      edu_col == "some_college" ~ "Some college, no degree",
+      edu_col == "associates"   ~ "Associate's degree",
+      edu_col == "bachelors"    ~ "Bachelor's degree",
+      edu_col == "masters"      ~ "Master's degree",
+      edu_col == "doctoral"     ~ "Doctoral or professional degree"
+    ),
+    edu_level = factor(edu_level, levels = edu_levels)
+  )
+```
+
+```{r dq, results='asis'}
+cat(paste0("**Vintage:** ", VINTAGE, "\n\n"))
+cat(paste0("**Programs found:** ", nrow(shrs_wide), " of 9\n\n"))
+missing <- setdiff(target_socs, shrs_wide$soc_code)
+if (length(missing) > 0) {
+  miss_names <- soc_xwalk |> filter(soc_code %in% missing) |> pull(shrs_program)
+  cat(paste0("> **Missing:** ", paste(miss_names, collapse = ", "), "\n\n"))
+}
+```
+
+---
+
+# 2 — Workforce Education Distribution
+
+```{r dist-chart, fig.height=7}
+shrs_long |>
+  ggplot(aes(x = factor(shrs_program, levels = soc_xwalk$shrs_program),
+             y = pct, fill = edu_level)) +
+  geom_col(width = 0.7) +
+  scale_fill_viridis_d(option = "D", direction = -1, name = "Education Level") +
+  labs(title = paste0("Workforce Educational Attainment (", VINTAGE, ")"),
+       subtitle = "BLS Table 5.3", x = NULL, y = "Percent (%)") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+```{r dist-table}
+shrs_wide |>
+  select(Program = shrs_program, Dept = shrs_dept,
+         `< HS` = less_than_hs, `HS` = hs_diploma, `Some Col` = some_college,
+         `Assoc` = associates, `Bach` = bachelors, `Master` = masters,
+         `Doct` = doctoral) |>
+  arrange(factor(Program, levels = soc_xwalk$shrs_program)) |>
+  kable(digits = 1, caption = paste0("Attainment (", VINTAGE, ")")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 3 — Graduate Concentration
+
+```{r grad}
+grad_share <- shrs_wide |>
+  mutate(grad_pct = as.numeric(masters) + as.numeric(doctoral)) |>
+  select(shrs_program, shrs_dept, soc_code, grad_pct)
+
+all_occ_grad <- as.numeric(benchmark_row$masters) + as.numeric(benchmark_row$doctoral)
+
+grad_share <- grad_share |>
+  mutate(benchmark = all_occ_grad,
+         ratio_to_benchmark = round(grad_pct / all_occ_grad, 2))
+```
+
+```{r grad-chart, fig.height=5}
+grad_share |>
+  ggplot(aes(x = reorder(shrs_program, grad_pct), y = grad_pct, fill = shrs_program)) +
+  geom_col(width = 0.6) +
+  geom_hline(yintercept = all_occ_grad, linetype = "dashed", color = "gray40") +
+  annotate("text", x = 1.5, y = all_occ_grad + 2,
+           label = paste0("All occ: ", all_occ_grad, "%"), size = 3.5, color = "gray40") +
+  geom_text(aes(label = paste0(round(grad_pct, 1), "%")), hjust = -0.1, size = 3.8) +
+  coord_flip() + scale_fill_manual(values = program_colors) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(title = paste0("Graduate Concentration (", VINTAGE, ")"), x = NULL, y = "% Grad") +
+  theme_minimal(base_size = 13) + theme(legend.position = "none")
+```
+
+---
+
+# 4 — Dominant Education & Benchmark Diff
+
+```{r dominant}
+dominant_edu <- shrs_long |>
+  group_by(shrs_program, shrs_dept, soc_code) |>
+  slice_max(pct, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  select(shrs_program, shrs_dept, soc_code, dominant_edu = edu_level, dominant_pct = pct)
+
+dominant_edu |>
+  select(Program = shrs_program, `Mode` = dominant_edu, `%` = dominant_pct) |>
+  arrange(factor(Program, levels = soc_xwalk$shrs_program)) |>
+  kable(digits = 1) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r bench-diff, fig.height=8}
+bench_lookup <- bench_long |> select(edu_level, bench_pct = pct)
+
+diff_from_bench <- shrs_long |>
+  left_join(bench_lookup, by = "edu_level") |>
+  mutate(diff_pp = pct - bench_pct)
+
+diff_from_bench |>
+  ggplot(aes(x = edu_level, y = diff_pp, fill = diff_pp > 0)) +
+  geom_col(width = 0.6) + geom_hline(yintercept = 0, color = "gray30") +
+  facet_wrap(~ shrs_program, ncol = 3) +
+  scale_fill_manual(values = c("TRUE" = "#27ae60", "FALSE" = "#e74c3c"), guide = "none") +
+  labs(title = paste0("SHRS vs All Occupations (", VINTAGE, ")"), x = NULL, y = "Diff (pp)") +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 7))
+```
+
+---
+
+# 5 — Attainment Scorecard (0–100)
+
+```{r scorecard}
+attain_scorecard <- shrs_wide |>
+  mutate(
+    grad_pct = as.numeric(masters) + as.numeric(doctoral),
+    sub_bach_pct = as.numeric(less_than_hs) + as.numeric(hs_diploma) + as.numeric(some_college)
+  ) |>
+  left_join(dominant_edu |> select(shrs_program, dominant_pct), by = "shrs_program") |>
+  mutate(
+    d1_grad_intensity = round(pmin(grad_pct / all_occ_grad * 50, 100), 1),
+    d2_concentration  = round(dominant_pct, 1),
+    d3_sub_bach_ctrl  = round(100 - sub_bach_pct, 1),
+    composite = round((d1_grad_intensity + d2_concentration + d3_sub_bach_ctrl) / 3, 1),
+    signal = case_when(composite >= 70 ~ "Green", composite >= 50 ~ "Yellow", TRUE ~ "Red")
+  )
+
+sc_ord <- attain_scorecard |> arrange(desc(composite))
+sc_ord |>
+  select(Program = shrs_program, `Grad Int` = d1_grad_intensity,
+         Conc = d2_concentration, `Sub-Bach` = d3_sub_bach_ctrl,
+         Composite = composite, Signal = signal) |>
+  kable(digits = 1, caption = paste0("Attainment Scorecard (", VINTAGE, ")")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  column_spec(6, color = "white",
+              background = ifelse(sc_ord$signal == "Green", "#27ae60",
+                           ifelse(sc_ord$signal == "Yellow", "#f39c12", "#e74c3c")))
+```
+
+```{r sc-rank, fig.height=5}
+attain_scorecard |>
+  ggplot(aes(x = reorder(shrs_program, composite), y = composite, fill = signal)) +
+  geom_col(width = 0.6) + geom_text(aes(label = composite), hjust = -0.1, size = 4) +
+  coord_flip() + scale_fill_manual(values = signal_colors) +
+  scale_y_continuous(limits = c(0, 105)) +
+  labs(title = paste0("Attainment Composite (", VINTAGE, ")"), x = NULL, y = "Score") +
+  theme_minimal(base_size = 13) + theme(legend.position = "bottom")
+```
+
+---
+
+# 6 — Stored Outputs
+
+```{r store}
+t53_2021_shrs_wide      <- shrs_wide
+t53_2021_shrs_long      <- shrs_long
+t53_2021_benchmark      <- bench_long
+t53_2021_grad_share     <- grad_share
+t53_2021_dominant_edu   <- dominant_edu
+t53_2021_diff_benchmark <- diff_from_bench
+t53_2021_scorecard      <- attain_scorecard
+t53_2021_all_occ_grad   <- all_occ_grad
+```
+
+```{r catalog, results='asis'}
+cat("| Variable | Description | Dims |\n|---|---|---|\n")
+cat(paste0("| `t53_2021_shrs_wide` | Wide attainment | ", nrow(shrs_wide), " x ", ncol(shrs_wide), " |\n"))
+cat(paste0("| `t53_2021_shrs_long` | Long attainment | ", nrow(shrs_long), " x ", ncol(shrs_long), " |\n"))
+cat(paste0("| `t53_2021_grad_share` | Grad concentration | ", nrow(grad_share), " x ", ncol(grad_share), " |\n"))
+cat(paste0("| `t53_2021_scorecard` | 3-dim scorecard | ", nrow(attain_scorecard), " x ", ncol(attain_scorecard), " |\n"))
+cat("| `t53_2021_all_occ_grad` | Benchmark scalar | 1 |\n")
+```
+
+**Source:** BLS Table 5.3, 2021 vintage.

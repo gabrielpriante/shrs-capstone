@@ -1,0 +1,731 @@
+---
+title: "SHRS National Employment Analysis"
+author: "gpps"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+# 0 — Configuration
+
+**To run this for a different year**: change `DATA_FILE` and `DATA_YEAR` below.
+Everything else adapts automatically.
+
+```{r config}
+# ══════════════════════════════════════════════════════════════════════════════
+# CHANGE THESE TWO LINES FOR EACH YEAR — everything else adapts automatically
+# ══════════════════════════════════════════════════════════════════════════════
+DATA_FILE <- '/Users/gpps/Documents/SHRS_Analysis/market_analysis/v3data/national_employment_by_year_csv/national_M2016_dl - national_dl.csv'
+DATA_YEAR <- 2016
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── SOC crosswalk — all 9 SHRS programs (stable across years) ──
+soc_crosswalk <- tibble::tribble(
+  ~shrs_program, ~shrs_dept, ~soc_code,  ~occupation_title,              ~pitt_degree,
+  "SLP",         "CSD",      "29-1127",  "Speech-Language Pathologists",  "Master's",
+  "AuD",         "CSD",      "29-1181",  "Audiologists",                  "Doctoral",
+  "HIM",         "HIM",      "29-9021",  "Health Information Technologists and Medical Registrars", "Master's",
+  "OTD",         "OT",       "29-1122",  "Occupational Therapists",       "Doctoral",
+  "DPT",         "PT",       "29-1123",  "Physical Therapists",           "Doctoral",
+  "PAS",         "PAS",      "29-1071",  "Physician Assistants",          "Master's",
+  "AT",          "SMN",      "29-9091",  "Athletic Trainers",             "Master's",
+  "DN",          "SMN",      "29-1031",  "Dietitians and Nutritionists",  "Master's",
+  "SS",          "SMN",      "29-1128",  "Exercise Physiologists",        "Master's"
+)
+
+# Benchmark SOC codes
+BENCHMARK_ALL_OCC   <- "00-0000"
+BENCHMARK_HC_MAJOR  <- "29-0000"
+
+# ── COLOR SYSTEM ──
+# Health performance: Red (poor) / Yellow (moderate) / Green (strong)
+# Statistical / neutral visuals: Blue
+COL_GREEN  <- "#27ae60"
+COL_YELLOW <- "#f39c12"
+COL_RED    <- "#e74c3c"
+COL_BLUE   <- "#2980b9"
+COL_BLUE_LIGHT <- "#85c1e9"
+COL_GRAY   <- "#95a5a6"
+
+# Health performance scale (for filled bars, tiles, etc.)
+health_colors <- c("Strong" = COL_GREEN, "Moderate" = COL_YELLOW, "Weak" = COL_RED)
+
+# Precision scale (green = good precision, red = poor precision)
+precision_colors <- c("High Precision" = COL_GREEN, "Moderate" = COL_YELLOW, "Low Precision" = COL_RED)
+
+# ── SOC legacy mapping for older OEWS vintages ──
+# The 2018 SOC revision changed some codes. If running on pre-2019 files
+# and a program shows as missing, you may need to use these legacy codes:
+#   HIM: 29-2071 (Medical Records and Health Information Technicians) → now 29-9021
+#   PAS: 29-1071 (unchanged)
+#   SS:  29-1128 (may not exist before ~2018; lumped into broader groups)
+# The crosswalk above uses current (2018+) SOC codes.
+```
+
+```{r packages}
+library(tidyverse)
+library(scales)
+library(kableExtra)
+```
+
+---
+
+# 1 — Load & Clean Data
+
+```{r load-data}
+raw <- read_csv(DATA_FILE, show_col_types = FALSE)
+cat("Loaded", nrow(raw), "rows,", ncol(raw), "columns\n")
+cat("Columns:", paste(names(raw), collapse = ", "), "\n")
+```
+
+```{r clean-data}
+# Helper: clean BLS numeric fields (remove commas, convert suppressed values to NA)
+clean_bls_num <- function(x) {
+  x <- as.character(x)
+  x <- str_remove_all(x, ",")
+  x <- if_else(x %in% c("*", "**", "#", "\u2014", "--", "N/A", ""), NA_character_, x)
+  as.numeric(x)
+}
+
+# Clean the full dataset
+oews <- raw %>%
+  mutate(
+    year      = DATA_YEAR,
+    tot_emp   = clean_bls_num(TOT_EMP),
+    emp_prse  = clean_bls_num(EMP_PRSE),
+    a_mean    = clean_bls_num(A_MEAN),
+    a_median  = clean_bls_num(A_MEDIAN),
+    a_pct10   = clean_bls_num(A_PCT10),
+    a_pct25   = clean_bls_num(A_PCT25),
+    a_pct75   = clean_bls_num(A_PCT75),
+    a_pct90   = clean_bls_num(A_PCT90),
+    h_mean    = clean_bls_num(H_MEAN),
+    h_median  = clean_bls_num(H_MEDIAN),
+    mean_prse = clean_bls_num(MEAN_PRSE)
+  ) %>%
+  select(year, occ_code = OCC_CODE, occ_title = OCC_TITLE, occ_group = OCC_GROUP,
+         tot_emp, emp_prse, a_mean, a_median, a_pct10, a_pct25, a_pct75, a_pct90,
+         h_mean, h_median, mean_prse)
+
+# Extract benchmarks
+bench_all <- oews %>% filter(occ_code == BENCHMARK_ALL_OCC)
+bench_hc  <- oews %>% filter(occ_code == BENCHMARK_HC_MAJOR)
+
+# Extract SHRS programs
+shrs <- oews %>%
+  filter(occ_code %in% soc_crosswalk$soc_code) %>%
+  left_join(soc_crosswalk, by = c("occ_code" = "soc_code")) %>%
+  select(year, shrs_program, shrs_dept, pitt_degree, occ_code,
+         occ_title = occupation_title,
+         tot_emp, emp_prse, a_mean, a_median,
+         a_pct10, a_pct25, a_pct75, a_pct90,
+         h_mean, h_median, mean_prse)
+
+cat("\n\u2500\u2500 SHRS programs found:", nrow(shrs), "of", nrow(soc_crosswalk), "expected \u2500\u2500\n")
+if (nrow(shrs) < nrow(soc_crosswalk)) {
+  missing <- setdiff(soc_crosswalk$soc_code, shrs$occ_code)
+  cat("MISSING SOC codes:", paste(missing, collapse = ", "), "\n")
+}
+```
+
+---
+
+# 2 — Employment Overview
+
+## 2.1 Employment Levels
+
+```{r emp-table}
+emp_summary <- shrs %>%
+  select(shrs_program, occ_title, tot_emp, emp_prse) %>%
+  bind_rows(
+    tibble(shrs_program = "All Occupations",
+           occ_title = "All Occupations",
+           tot_emp = bench_all$tot_emp, emp_prse = bench_all$emp_prse),
+    tibble(shrs_program = "Healthcare (29-0000)",
+           occ_title = "Healthcare Practitioners & Technical",
+           tot_emp = bench_hc$tot_emp, emp_prse = bench_hc$emp_prse)
+  ) %>%
+  mutate(
+    pct_of_all_occ = round(tot_emp / bench_all$tot_emp * 100, 4),
+    pct_of_hc      = round(tot_emp / bench_hc$tot_emp * 100, 2)
+  )
+
+emp_summary %>%
+  select(Program = shrs_program, Occupation = occ_title,
+         `Total Emp` = tot_emp, `Emp PRSE (%)` = emp_prse,
+         `% of All Occ` = pct_of_all_occ, `% of HC Sector` = pct_of_hc) %>%
+  kable(format.args = list(big.mark = ","), digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 2.2 Employment Bar Chart
+
+```{r emp-bar, fig.height=6}
+shrs %>%
+  ggplot(aes(x = reorder(shrs_program, tot_emp), y = tot_emp)) +
+  geom_col(width = 0.6, fill = COL_BLUE) +
+  geom_text(aes(label = comma(tot_emp)), hjust = -0.1, size = 3.8) +
+  coord_flip() +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.25))) +
+  labs(
+    title    = paste0("National Employment by SHRS Occupation (", DATA_YEAR, ")"),
+    subtitle = "Source: BLS Occupational Employment and Wage Statistics",
+    x = NULL, y = "Total Employment"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+## 2.3 Market Size Context
+
+```{r emp-share-plot, fig.height=6}
+shrs %>%
+  mutate(pct_hc = tot_emp / bench_hc$tot_emp * 100) %>%
+  ggplot(aes(x = reorder(shrs_program, pct_hc), y = pct_hc)) +
+  geom_col(width = 0.6, fill = COL_BLUE) +
+  geom_text(aes(label = paste0(round(pct_hc, 2), "%")), hjust = -0.1, size = 3.8) +
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.3))) +
+  labs(
+    title    = paste0("Share of Healthcare Practitioner Employment (", DATA_YEAR, ")"),
+    subtitle = paste0("Denominator: ", comma(bench_hc$tot_emp),
+                      " total healthcare practitioners & technical occupations"),
+    x = NULL, y = "% of Healthcare Sector"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+---
+
+# 3 — Wage Analysis
+
+## 3.1 Wage Distribution Summary
+
+```{r wage-table}
+wage_summary <- shrs %>%
+  select(shrs_program, a_pct10, a_pct25, a_median, a_pct75, a_pct90, a_mean) %>%
+  bind_rows(
+    tibble(shrs_program = "All Occupations",
+           a_pct10 = bench_all$a_pct10, a_pct25 = bench_all$a_pct25,
+           a_median = bench_all$a_median, a_pct75 = bench_all$a_pct75,
+           a_pct90 = bench_all$a_pct90, a_mean = bench_all$a_mean),
+    tibble(shrs_program = "Healthcare (29-0000)",
+           a_pct10 = bench_hc$a_pct10, a_pct25 = bench_hc$a_pct25,
+           a_median = bench_hc$a_median, a_pct75 = bench_hc$a_pct75,
+           a_pct90 = bench_hc$a_pct90, a_mean = bench_hc$a_mean)
+  ) %>%
+  mutate(
+    iqr         = a_pct75 - a_pct25,
+    wage_spread = a_pct90 - a_pct10,
+    skew_ratio  = round((a_mean - a_median) / a_median * 100, 1),
+    median_ratio_vs_all = round(a_median / bench_all$a_median, 2)
+  )
+
+wage_summary %>%
+  select(Program = shrs_program, P10 = a_pct10, P25 = a_pct25,
+         Median = a_median, P75 = a_pct75, P90 = a_pct90, Mean = a_mean,
+         IQR = iqr, `90-10 Spread` = wage_spread,
+         `Mean-Med Skew (%)` = skew_ratio, `vs All Occ` = median_ratio_vs_all) %>%
+  kable(format.args = list(big.mark = ",")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 3.2 Wage Distribution Visualization
+
+```{r wage-box, fig.height=7}
+shrs %>%
+  ggplot(aes(x = reorder(shrs_program, a_median))) +
+  geom_linerange(aes(ymin = a_pct10, ymax = a_pct90),
+                 linewidth = 1, color = COL_GRAY) +
+  geom_crossbar(aes(y = a_median, ymin = a_pct25, ymax = a_pct75),
+                width = 0.4, fill = COL_BLUE_LIGHT, alpha = 0.5,
+                color = COL_BLUE) +
+  geom_point(aes(y = a_median), size = 3, color = COL_BLUE) +
+  geom_hline(yintercept = bench_all$a_median, linetype = "dashed",
+             color = "gray40", linewidth = 0.6) +
+  annotate("text", x = 0.5, y = bench_all$a_median,
+           label = paste0("All Occ Median: ", dollar(bench_all$a_median)),
+           hjust = 0, vjust = -0.5, size = 3, color = "gray40") +
+  geom_hline(yintercept = bench_hc$a_median, linetype = "dotted",
+             color = "gray30", linewidth = 0.6) +
+  annotate("text", x = 0.5, y = bench_hc$a_median,
+           label = paste0("HC Median: ", dollar(bench_hc$a_median)),
+           hjust = 0, vjust = -0.5, size = 3, color = "gray30") +
+  coord_flip() +
+  scale_y_continuous(labels = dollar) +
+  labs(
+    title    = paste0("Annual Wage Distribution by SHRS Occupation (", DATA_YEAR, ")"),
+    subtitle = "Box = IQR (25th\u201375th); whiskers = 10th\u201390th; point = median",
+    x = NULL, y = "Annual Wage"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+## 3.3 Wage Premium — Health Performance
+
+Color indicates health: green (strong premium), yellow (near benchmark), red
+(below benchmark).
+
+```{r wage-premium, fig.height=7}
+wage_premium <- shrs %>%
+  mutate(
+    premium_pct = (a_median - bench_all$a_median) / bench_all$a_median * 100,
+    wage_se     = a_mean * (mean_prse / 100),
+    ci_lower    = a_median - 1.96 * wage_se,
+    ci_upper    = a_median + 1.96 * wage_se,
+    prem_lower  = (ci_lower - bench_all$a_median) / bench_all$a_median * 100,
+    prem_upper  = (ci_upper - bench_all$a_median) / bench_all$a_median * 100,
+    health = case_when(
+      premium_pct >= 50  ~ "Strong",
+      premium_pct >= 0   ~ "Moderate",
+      TRUE               ~ "Weak"
+    )
+  )
+
+wage_premium %>%
+  ggplot(aes(x = reorder(shrs_program, premium_pct), y = premium_pct,
+             fill = health)) +
+  geom_col(width = 0.6) +
+  geom_errorbar(aes(ymin = prem_lower, ymax = prem_upper),
+                width = 0.2, linewidth = 0.6) +
+  geom_hline(yintercept = 0, linewidth = 0.5) +
+  coord_flip() +
+  scale_fill_manual(values = health_colors, name = "Health") +
+  labs(
+    title    = paste0("Wage Premium vs National Median (", DATA_YEAR, ")"),
+    subtitle = paste0("Error bars: approx 95% CI using BLS PRSE | ",
+                      "National median: ", dollar(bench_all$a_median)),
+    x = NULL, y = "Premium over national median (%)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+## 3.4 Wage Dispersion (IQR)
+
+```{r wage-iqr, fig.height=7}
+shrs %>%
+  mutate(iqr = a_pct75 - a_pct25) %>%
+  ggplot(aes(x = reorder(shrs_program, iqr), y = iqr)) +
+  geom_col(width = 0.6, fill = COL_BLUE) +
+  geom_text(aes(label = dollar(iqr)), hjust = -0.1, size = 3.8) +
+  coord_flip() +
+  scale_y_continuous(labels = dollar, expand = expansion(mult = c(0, 0.25))) +
+  labs(
+    title    = paste0("Wage Dispersion (IQR) by SHRS Occupation (", DATA_YEAR, ")"),
+    subtitle = "Difference between 75th and 25th percentile annual wages",
+    x = NULL, y = "Inter-Quartile Range ($)"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+---
+
+# 4 — Cross-Program Comparisons
+
+## 4.1 Employment vs Median Wage Scatter
+
+```{r scatter, fig.height=7}
+shrs %>%
+  ggplot(aes(x = tot_emp, y = a_median, label = shrs_program)) +
+  geom_point(size = 5, color = COL_BLUE) +
+  geom_text(vjust = -1.2, size = 4.5, fontface = "bold") +
+  geom_vline(xintercept = median(shrs$tot_emp), linetype = "dashed",
+             color = "gray60") +
+  geom_hline(yintercept = bench_all$a_median, linetype = "dashed",
+             color = "gray60") +
+  scale_x_continuous(labels = comma) +
+  scale_y_continuous(labels = dollar) +
+  labs(
+    title    = paste0("Employment Size vs Wage Level (", DATA_YEAR, ")"),
+    subtitle = paste0("Vertical dashed = SHRS median employment; ",
+                      "horizontal dashed = national median wage (",
+                      dollar(bench_all$a_median), ")"),
+    x = "Total National Employment", y = "Median Annual Wage"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+## 4.2 Ranking Among All Healthcare Occupations — Wages
+
+```{r hc-ranking}
+hc_detailed <- oews %>%
+  filter(str_starts(occ_code, "29-"),
+         occ_group == "detailed",
+         !is.na(a_median)) %>%
+  arrange(desc(a_median)) %>%
+  mutate(
+    wage_rank   = row_number(),
+    n_hc_occs   = n(),
+    wage_pctile = round((1 - wage_rank / n_hc_occs) * 100, 1),
+    is_shrs     = occ_code %in% soc_crosswalk$soc_code
+  )
+
+shrs_wage_ranks <- hc_detailed %>%
+  filter(is_shrs) %>%
+  left_join(soc_crosswalk, by = c("occ_code" = "soc_code")) %>%
+  select(shrs_program, occ_title = occupation_title, a_median,
+         wage_rank, n_hc_occs, wage_pctile)
+
+shrs_wage_ranks %>%
+  select(Program = shrs_program, Occupation = occ_title,
+         `Median Wage` = a_median, `Rank (of HC)` = wage_rank,
+         `Total HC Occs` = n_hc_occs, `Wage Percentile` = wage_pctile) %>%
+  kable(format.args = list(big.mark = ",")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r hc-rank-plot, fig.height=6}
+hc_detailed %>%
+  ggplot(aes(x = wage_rank, y = a_median)) +
+  geom_point(aes(color = is_shrs, size = is_shrs), alpha = 0.6) +
+  geom_text(
+    data = hc_detailed %>% filter(is_shrs) %>%
+      left_join(soc_crosswalk, by = c("occ_code" = "soc_code")),
+    aes(label = shrs_program), vjust = -1.2, size = 4, fontface = "bold",
+    color = "black"
+  ) +
+  scale_color_manual(values = c("FALSE" = COL_GRAY, "TRUE" = COL_BLUE)) +
+  scale_size_manual(values = c("FALSE" = 2, "TRUE" = 4)) +
+  scale_y_continuous(labels = dollar) +
+  labs(
+    title    = paste0("SHRS in the Healthcare Wage Distribution (", DATA_YEAR, ")"),
+    subtitle = paste0(nrow(hc_detailed), " detailed healthcare practitioner occupations"),
+    x = "Wage Rank (1 = highest)", y = "Median Annual Wage"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+## 4.3 Ranking Among HC Occupations — Employment
+
+```{r hc-emp-ranking}
+hc_emp_ranked <- oews %>%
+  filter(str_starts(occ_code, "29-"),
+         occ_group == "detailed",
+         !is.na(tot_emp)) %>%
+  arrange(desc(tot_emp)) %>%
+  mutate(
+    emp_rank   = row_number(),
+    n_hc_occs  = n(),
+    emp_pctile = round((1 - emp_rank / n_hc_occs) * 100, 1),
+    is_shrs    = occ_code %in% soc_crosswalk$soc_code
+  )
+
+shrs_emp_ranks <- hc_emp_ranked %>%
+  filter(is_shrs) %>%
+  left_join(soc_crosswalk, by = c("occ_code" = "soc_code")) %>%
+  select(shrs_program, occ_title = occupation_title, tot_emp,
+         emp_rank, n_hc_occs, emp_pctile)
+
+shrs_emp_ranks %>%
+  select(Program = shrs_program, Occupation = occ_title,
+         `Total Emp` = tot_emp, `Rank (of HC)` = emp_rank,
+         `Total HC Occs` = n_hc_occs, `Emp Percentile` = emp_pctile) %>%
+  kable(format.args = list(big.mark = ",")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 5 — Data Quality & Precision Assessment
+
+Higher PRSE = less precise estimate. Color indicates data quality health:
+green (reliable), yellow (usable with caution), red (interpret carefully).
+
+```{r precision}
+precision <- shrs %>%
+  select(shrs_program, tot_emp, emp_prse, a_mean, mean_prse) %>%
+  mutate(
+    emp_95ci_lower  = round(tot_emp * (1 - 1.96 * emp_prse / 100)),
+    emp_95ci_upper  = round(tot_emp * (1 + 1.96 * emp_prse / 100)),
+    wage_se         = a_mean * (mean_prse / 100),
+    wage_95ci_lower = round(a_mean - 1.96 * wage_se),
+    wage_95ci_upper = round(a_mean + 1.96 * wage_se),
+    precision_flag  = case_when(
+      emp_prse > 5 | mean_prse > 3 ~ "Low Precision",
+      emp_prse > 2 | mean_prse > 1 ~ "Moderate",
+      TRUE                          ~ "High Precision"
+    )
+  )
+
+precision %>%
+  select(Program = shrs_program, `Total Emp` = tot_emp,
+         `Emp PRSE (%)` = emp_prse,
+         `Emp 95% CI Lo` = emp_95ci_lower, `Emp 95% CI Hi` = emp_95ci_upper,
+         `Mean Wage` = a_mean, `Wage PRSE (%)` = mean_prse,
+         `Wage 95% CI Lo` = wage_95ci_lower, `Wage 95% CI Hi` = wage_95ci_upper,
+         Flag = precision_flag) %>%
+  kable(format.args = list(big.mark = ",")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r precision-plot, fig.height=7}
+precision %>%
+  ggplot(aes(x = reorder(shrs_program, emp_prse), y = emp_prse,
+             fill = precision_flag)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(emp_prse, "%")), hjust = -0.1, size = 3.8) +
+  coord_flip() +
+  scale_fill_manual(values = precision_colors, name = "Data Quality") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.25))) +
+  labs(
+    title    = paste0("Estimate Precision by SHRS Occupation (", DATA_YEAR, ")"),
+    subtitle = "Employment PRSE (%) \u2014 lower is more precise",
+    x = NULL, y = "Percent Relative Standard Error (%)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+---
+
+# 6 — Market Health Snapshot
+
+Single-view health assessment for each SHRS program based on this year's
+OEWS data. Each dimension is scored and colored.
+
+```{r market-health}
+market_health <- shrs %>%
+  mutate(
+    # Wage health: premium over national median
+    wage_premium_pct = round((a_median / bench_all$a_median - 1) * 100, 1),
+    wage_health = case_when(
+      a_median >= bench_hc$a_median  ~ "Strong",
+      a_median >= bench_all$a_median ~ "Moderate",
+      TRUE                           ~ "Weak"
+    ),
+    # Market size health: employment volume
+    emp_health = case_when(
+      tot_emp >= 100000 ~ "Strong",
+      tot_emp >= 25000  ~ "Moderate",
+      TRUE              ~ "Weak"
+    ),
+    # Data quality health: PRSE
+    data_health = case_when(
+      emp_prse <= 2 & mean_prse <= 1 ~ "Strong",
+      emp_prse <= 5 & mean_prse <= 3 ~ "Moderate",
+      TRUE                           ~ "Weak"
+    ),
+    # HC percentile ranks (from earlier computations)
+    wage_pctile_hc = shrs_wage_ranks$wage_pctile[
+      match(shrs_program, shrs_wage_ranks$shrs_program)],
+    emp_pctile_hc = shrs_emp_ranks$emp_pctile[
+      match(shrs_program, shrs_emp_ranks$shrs_program)]
+  )
+
+market_health %>%
+  select(Program = shrs_program, Dept = shrs_dept, Degree = pitt_degree,
+         `Tot Emp` = tot_emp, `Emp Health` = emp_health,
+         `Median Wage` = a_median, `Wage Prem (%)` = wage_premium_pct,
+         `Wage Health` = wage_health,
+         `HC Wage %ile` = wage_pctile_hc, `HC Emp %ile` = emp_pctile_hc,
+         `Data Quality` = data_health) %>%
+  kable(format.args = list(big.mark = ",")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r health-tile, fig.height=6}
+health_long <- market_health %>%
+  select(shrs_program, `Market Size` = emp_health,
+         `Wage Level` = wage_health, `Data Quality` = data_health) %>%
+  pivot_longer(-shrs_program, names_to = "dimension", values_to = "health")
+
+health_long %>%
+  mutate(health = factor(health, levels = c("Weak", "Moderate", "Strong"))) %>%
+  ggplot(aes(x = dimension, y = shrs_program, fill = health)) +
+  geom_tile(color = "white", linewidth = 1) +
+  geom_text(aes(label = health), size = 3.5, fontface = "bold") +
+  scale_fill_manual(values = health_colors, name = "Health") +
+  labs(
+    title    = paste0("SHRS Program Health Snapshot (", DATA_YEAR, ")"),
+    subtitle = "Green = strong | Yellow = moderate | Red = weak",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(panel.grid = element_blank(),
+        axis.text.x = element_text(face = "bold"))
+```
+
+---
+
+# 7 — Output Registry
+
+All named output objects produced by this analysis, stored and labeled for
+downstream aggregation or further manipulation.
+
+```{r output-registry}
+# ══════════════════════════════════════════════════════════════════════════════
+# OUTPUT REGISTRY
+# Every key object available after knitting / sourcing this file.
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# ── A. Core data ──
+#   oews             Full cleaned OEWS dataset (all occupations, all groups)
+#   shrs             Filtered to 9 SHRS programs with crosswalk fields
+#   bench_all        All-Occupations benchmark row (1 row)
+#   bench_hc         Healthcare Practitioners benchmark row (1 row)
+#   soc_crosswalk    SOC code -> SHRS program mapping table (9 rows)
+#
+# ── B. Employment analysis ──
+#   emp_summary      Employment levels + share of all occ / HC sector
+#                    (11 rows: 9 SHRS + 2 benchmarks)
+#
+# ── C. Wage analysis ──
+#   wage_summary     Full wage distribution (P10-P90, mean, IQR, skew)
+#                    per program + benchmarks
+#   wage_premium     Wage premium vs national median with 95% CI + health flag
+#
+# ── D. Rankings ──
+#   shrs_wage_ranks  SHRS programs ranked among all HC occupations by wage
+#   shrs_emp_ranks   SHRS programs ranked among all HC occupations by employment
+#   hc_detailed      Full HC occupation ranking by wage (for context)
+#   hc_emp_ranked    Full HC occupation ranking by employment (for context)
+#
+# ── E. Data quality ──
+#   precision        PRSE, 95% CIs, and precision flags per program
+#
+# ── F. Health assessment ──
+#   market_health    Per-program health flags + HC percentiles
+#   health_long      Long-format health flags (for tile visualization)
+#
+# ── G. Aggregation-ready summary ──
+#   output_year_summary   One row per program, designed to bind_rows() across years
+# ══════════════════════════════════════════════════════════════════════════════
+
+output_year_summary <- shrs %>%
+  select(year, shrs_program, shrs_dept, pitt_degree, occ_code, occ_title,
+         tot_emp, emp_prse, a_mean, a_median,
+         a_pct10, a_pct25, a_pct75, a_pct90,
+         h_mean, h_median, mean_prse) %>%
+  mutate(
+    # Benchmarks for this year
+    bench_all_emp    = bench_all$tot_emp,
+    bench_all_median = bench_all$a_median,
+    bench_hc_emp     = bench_hc$tot_emp,
+    bench_hc_median  = bench_hc$a_median,
+    # Derived metrics
+    iqr                 = a_pct75 - a_pct25,
+    wage_spread_90_10   = a_pct90 - a_pct10,
+    wage_premium_vs_all = round((a_median / bench_all$a_median - 1) * 100, 1),
+    wage_premium_vs_hc  = round((a_median / bench_hc$a_median - 1) * 100, 1),
+    pct_of_all_emp      = round(tot_emp / bench_all$tot_emp * 100, 4),
+    pct_of_hc_emp       = round(tot_emp / bench_hc$tot_emp * 100, 3),
+    # Health flags
+    wage_health = case_when(
+      a_median >= bench_hc$a_median  ~ "Strong",
+      a_median >= bench_all$a_median ~ "Moderate",
+      TRUE                           ~ "Weak"
+    ),
+    emp_health = case_when(
+      tot_emp >= 100000 ~ "Strong",
+      tot_emp >= 25000  ~ "Moderate",
+      TRUE              ~ "Weak"
+    ),
+    data_health = case_when(
+      emp_prse <= 2 & mean_prse <= 1 ~ "Strong",
+      emp_prse <= 5 & mean_prse <= 3 ~ "Moderate",
+      TRUE                           ~ "Weak"
+    ),
+    # HC percentile ranks
+    wage_pctile_hc = shrs_wage_ranks$wage_pctile[
+      match(shrs_program, shrs_wage_ranks$shrs_program)],
+    emp_pctile_hc = shrs_emp_ranks$emp_pctile[
+      match(shrs_program, shrs_emp_ranks$shrs_program)]
+  )
+
+cat("\n")
+cat("======================================================\n")
+cat("  OUTPUT REGISTRY \u2014 ", DATA_YEAR, "\n")
+cat("======================================================\n")
+cat("  oews               :", nrow(oews), "rows x", ncol(oews), "cols\n")
+cat("  shrs               :", nrow(shrs), "rows x", ncol(shrs), "cols\n")
+cat("  emp_summary        :", nrow(emp_summary), "rows\n")
+cat("  wage_summary       :", nrow(wage_summary), "rows\n")
+cat("  wage_premium       :", nrow(wage_premium), "rows\n")
+cat("  shrs_wage_ranks    :", nrow(shrs_wage_ranks), "rows\n")
+cat("  shrs_emp_ranks     :", nrow(shrs_emp_ranks), "rows\n")
+cat("  precision          :", nrow(precision), "rows\n")
+cat("  market_health      :", nrow(market_health), "rows\n")
+cat("  output_year_summary:", nrow(output_year_summary), "rows x",
+    ncol(output_year_summary), "cols\n")
+cat("======================================================\n")
+```
+
+### Aggregation-Ready Summary Table
+
+```{r summary-table}
+output_year_summary %>%
+  select(Year = year, Program = shrs_program, Dept = shrs_dept,
+         `Total Emp` = tot_emp, `Emp PRSE` = emp_prse,
+         `Median Wage` = a_median, `Mean Wage` = a_mean,
+         IQR = iqr,
+         `Prem vs All (%)` = wage_premium_vs_all,
+         `Prem vs HC (%)` = wage_premium_vs_hc,
+         `Wage Health` = wage_health,
+         `Emp Health` = emp_health,
+         `Data Quality` = data_health) %>%
+  kable(format.args = list(big.mark = ",")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r save-summary, eval=FALSE}
+# ── Uncomment to save this year's summary as CSV for aggregation ──
+# write_csv(output_year_summary,
+#           paste0("shrs_oews_summary_", DATA_YEAR, ".csv"))
+```
+
+---
+
+# Appendix: Data Source & Methodology
+
+**Source**: Bureau of Labor Statistics, Occupational Employment and Wage
+Statistics (OEWS) Survey, `r DATA_YEAR` national estimates.
+
+**Color system**:
+
+| Color | Usage | Meaning |
+|---|---|---|
+| Green | Health performance | Strong / above HC benchmark |
+| Yellow | Health performance | Moderate / above national but below HC |
+| Red | Health performance | Weak / below national benchmark |
+| Blue | Statistical visuals | Descriptive data (distributions, rankings, comparisons) |
+| Gray | Supporting elements | Non-SHRS reference points, whiskers, benchmarks |
+
+**Health thresholds**:
+
+| Dimension | Weak (Red) | Moderate (Yellow) | Strong (Green) |
+|---|---|---|---|
+| Wage Level | Below national median | Above national, below HC median | At or above HC median |
+| Market Size | < 25,000 employed | 25,000 \u2013 99,999 | 100,000+ |
+| Data Quality | PRSE > 5% (emp) or > 3% (wage) | PRSE 2\u20135% or 1\u20133% | PRSE \u2264 2% (emp) and \u2264 1% (wage) |
+
+**Key metrics**:
+
+- **Total Employment**: Estimated number of workers in the occupation nationally
+- **PRSE**: Percent Relative Standard Error \u2014 measures estimate precision (lower = better)
+- **Wage percentiles**: Annual wages at the 10th, 25th, 50th (median), 75th, and 90th percentiles
+- **Wage premium**: Percentage by which occupation median exceeds the all-occupations or HC sector median
+- **IQR**: Inter-quartile range (P75 \u2212 P25) \u2014 measures wage dispersion within an occupation
+
+**Precision notes**: Confidence intervals use the normal approximation:
+estimate \u00b1 1.96 \u00d7 SE, where SE = estimate \u00d7 PRSE/100.
+
+**Benchmarks**:
+
+- All Occupations (00-0000): `r comma(bench_all$tot_emp)` employed, median `r dollar(bench_all$a_median)`
+- Healthcare Practitioners & Technical (29-0000): `r comma(bench_hc$tot_emp)` employed, median `r dollar(bench_hc$a_median)`

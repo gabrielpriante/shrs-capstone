@@ -1,0 +1,581 @@
+---
+title: "SHRS Market Analysis — BLS Projections 2021–2031"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+# 0 — Setup & Data Loading
+
+## 0.1 Packages
+
+```{r packages}
+library(tidyverse)
+library(scales)
+library(knitr)
+library(kableExtra)
+```
+
+## 0.2 SOC Crosswalk — All 9 SHRS Programs
+
+The 2021 cycle is the **first year** where HIM splits into 29-9021
+(Health Information Technologists) and 29-2072 (Medical Records Specialists).
+We use 29-9021 for the HIM program, consistent with later vintages.
+
+```{r crosswalk}
+soc_crosswalk <- tribble(
+  ~shrs_program, ~shrs_dept,  ~soc_code,  ~occupation_title,
+  "SLP",         "CSD",       "29-1127",  "Speech-Language Pathologists",
+  "AuD",         "CSD",       "29-1181",  "Audiologists",
+  "HIM",         "HIM",       "29-9021",  "Health Information Technologists and Medical Registrars",
+  "OTD",         "RST",       "29-1122",  "Occupational Therapists",
+  "DPT",         "RST",       "29-1123",  "Physical Therapists",
+  "PAS",         "PAS",       "29-1071",  "Physician Assistants",
+  "AT",          "SMN",       "29-9091",  "Athletic Trainers",
+  "DN",          "SMN",       "29-1031",  "Dietitians and Nutritionists",
+  "SS",          "SMN",       "29-1128",  "Exercise Physiologists"
+)
+
+target_socs <- soc_crosswalk$soc_code
+```
+
+## 0.3 Load Data
+
+```{r load-data}
+# ── EDIT THIS PATH to match your machine ──
+PROJ_CSV_PATH <- file.path(path.expand("~"), "Documents", "SHRS_Analysis",
+                            "market_analysis", "v3data", "projections_csv",
+                            "occupation_csv", "occupation_2021.csv")
+
+raw <- read_csv(PROJ_CSV_PATH, show_col_types = FALSE)
+
+# Standardize column names — same 14-column structure
+names(raw) <- c(
+  "occ_title", "soc_code", "occ_type",
+  "emp_base", "emp_projected",
+  "emp_change_num", "emp_change_pct",
+  "lf_exit_rate", "occ_transfer_rate", "total_sep_rate",
+  "lf_exits", "occ_transfers", "total_separations",
+  "annual_openings"
+)
+
+raw <- raw |>
+  mutate(across(c(emp_base:annual_openings), ~ {
+    x <- str_remove_all(as.character(.x), ",")
+    x <- na_if(x, "—")
+    x <- na_if(x, "--")
+    as.numeric(x)
+  }))
+```
+
+## 0.4 Extract Benchmarks & SHRS Subset
+
+```{r benchmarks}
+all_occ <- raw |> filter(soc_code == "00-0000")
+all_occ_growth_pct   <- all_occ$emp_change_pct
+all_occ_sep_rate     <- all_occ$total_sep_rate
+all_occ_openings     <- all_occ$annual_openings
+CYCLE <- "2021-2031"
+
+cat("All-Occupations benchmark (", CYCLE, "):\n")
+cat("  Growth:", all_occ_growth_pct, "%\n")
+cat("  Sep rate:", all_occ_sep_rate, "%\n")
+cat("  Annual openings:", comma(all_occ_openings * 1000), "\n")
+
+proj <- raw |>
+  filter(soc_code %in% target_socs, occ_type == "Line item") |>
+  left_join(soc_crosswalk, by = "soc_code") |>
+  select(shrs_program, shrs_dept, soc_code, occ_title = occupation_title,
+         emp_base, emp_projected, emp_change_num, emp_change_pct,
+         lf_exit_rate, occ_transfer_rate, total_sep_rate,
+         lf_exits, occ_transfers, total_separations, annual_openings) |>
+  arrange(shrs_dept, shrs_program)
+
+cat("\nSHRS programs loaded:", nrow(proj), "of 9 expected\n")
+cat("Programs found:", paste(proj$shrs_program, collapse = ", "), "\n")
+```
+
+---
+
+# 1 — Employment Growth Analysis
+
+## 1.1 Projected Growth Rates vs Benchmark
+
+```{r growth-bar, fig.height=6}
+proj |>
+  mutate(
+    health = case_when(
+      emp_change_pct >= all_occ_growth_pct * 2 ~ "Strong (≥2× avg)",
+      emp_change_pct >= all_occ_growth_pct     ~ "Healthy (≥ avg)",
+      emp_change_pct >= 0                       ~ "Caution (below avg)",
+      TRUE                                      ~ "Declining"
+    ),
+    health = factor(health, levels = c("Strong (≥2× avg)", "Healthy (≥ avg)",
+                                        "Caution (below avg)", "Declining"))
+  ) |>
+  ggplot(aes(x = reorder(shrs_program, emp_change_pct), y = emp_change_pct,
+             fill = health)) +
+  geom_col(width = 0.65) +
+  geom_hline(yintercept = all_occ_growth_pct, linetype = "dashed",
+             color = "gray30", linewidth = 0.8) +
+  geom_text(aes(label = paste0(emp_change_pct, "%")),
+            hjust = -0.15, size = 3.8, fontface = "bold") +
+  coord_flip() +
+  scale_fill_manual(values = c(
+    "Strong (≥2× avg)"   = "#1a9850",
+    "Healthy (≥ avg)"     = "#91cf60",
+    "Caution (below avg)" = "#fee08b",
+    "Declining"           = "#d73027"
+  )) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.2))) +
+  annotate("text", x = 0.5, y = all_occ_growth_pct,
+           label = paste0("All occupations: ", all_occ_growth_pct, "%"),
+           hjust = -0.05, vjust = -0.5, size = 3.3, color = "gray30") +
+  labs(
+    title    = paste0("Projected Employment Growth by SHRS Program (", CYCLE, ")"),
+    subtitle = "BLS National Employment Matrix | Dashed line = all-occupations benchmark",
+    x = NULL, y = "Projected Growth (%)", fill = "Market Signal"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+## 1.2 Employment Levels — Base vs Projected
+
+```{r emp-levels, fig.height=6}
+base_yr <- str_extract(CYCLE, "^\\d{4}")
+proj_yr <- str_extract(CYCLE, "\\d{4}$")
+
+proj |>
+  select(shrs_program, emp_base, emp_projected) |>
+  pivot_longer(cols = c(emp_base, emp_projected), names_to = "period",
+               values_to = "employment") |>
+  mutate(period = if_else(period == "emp_base", base_yr, proj_yr)) |>
+  ggplot(aes(x = reorder(shrs_program, employment), y = employment,
+             fill = period)) +
+  geom_col(position = "dodge", width = 0.6) +
+  geom_text(aes(label = comma(employment, accuracy = 0.1)),
+            position = position_dodge(width = 0.6), hjust = -0.1, size = 3) +
+  coord_flip() +
+  scale_fill_manual(values = setNames(c("#4393c3", "#2166ac"),
+                                       c(base_yr, proj_yr))) +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.25))) +
+  labs(
+    title    = paste0("Employment Levels: ", base_yr, " vs ", proj_yr,
+                      " Projected (thousands)"),
+    subtitle = "BLS National Employment Matrix",
+    x = NULL, y = "Employment (thousands)", fill = "Year"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+## 1.3 Growth Summary Table
+
+```{r growth-table}
+proj |>
+  mutate(
+    vs_benchmark_pp = round(emp_change_pct - all_occ_growth_pct, 1),
+    growth_signal = case_when(
+      emp_change_pct >= all_occ_growth_pct * 2 ~ "🟢 Strong",
+      emp_change_pct >= all_occ_growth_pct     ~ "🟢 Healthy",
+      emp_change_pct >= 0                       ~ "🟡 Caution",
+      TRUE                                      ~ "🔴 Declining"
+    )
+  ) |>
+  select(
+    Program       = shrs_program,
+    Dept          = shrs_dept,
+    `Emp Base (K)`  = emp_base,
+    `Emp Proj (K)`  = emp_projected,
+    `Change (K)`    = emp_change_num,
+    `Growth (%)`    = emp_change_pct,
+    `vs Bench (pp)` = vs_benchmark_pp,
+    Signal        = growth_signal
+  ) |>
+  arrange(desc(`Growth (%)`)) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 2 — Job Openings & Replacement Demand
+
+## 2.1 Components of Annual Openings
+
+```{r openings-components, fig.height=6}
+proj |>
+  mutate(growth_component = pmax(emp_change_num / 10, 0)) |>
+  select(shrs_program, `Labor Force Exits` = lf_exits,
+         `Occupational Transfers` = occ_transfers,
+         `Growth` = growth_component) |>
+  pivot_longer(-shrs_program, names_to = "component", values_to = "value") |>
+  mutate(component = factor(component,
+                             levels = c("Growth", "Occupational Transfers",
+                                        "Labor Force Exits"))) |>
+  ggplot(aes(x = reorder(shrs_program, value, sum), y = value,
+             fill = component)) +
+  geom_col(width = 0.6) +
+  coord_flip() +
+  scale_fill_manual(values = c(
+    "Growth"                  = "#2166ac",
+    "Occupational Transfers"  = "#fee08b",
+    "Labor Force Exits"       = "#d73027"
+  )) +
+  labs(
+    title    = paste0("Components of Annual Job Openings by SHRS Occupation"),
+    subtitle = paste0(CYCLE, " BLS projections (thousands per year)"),
+    x = NULL, y = "Annual Openings (thousands)", fill = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+## 2.2 Separation Rates vs Benchmark
+
+```{r sep-rates, fig.height=6}
+proj |>
+  select(shrs_program, lf_exit_rate, occ_transfer_rate) |>
+  pivot_longer(-shrs_program, names_to = "type", values_to = "rate") |>
+  mutate(type = if_else(type == "lf_exit_rate", "Labor Force Exit Rate",
+                        "Occupational Transfer Rate")) |>
+  ggplot(aes(x = reorder(shrs_program, rate, sum), y = rate, fill = type)) +
+  geom_col(width = 0.6) +
+  geom_hline(yintercept = all_occ_sep_rate, linetype = "dashed",
+             color = "gray30", linewidth = 0.7) +
+  coord_flip() +
+  scale_fill_manual(values = c(
+    "Labor Force Exit Rate"       = "#d73027",
+    "Occupational Transfer Rate"  = "#fee08b"
+  )) +
+  annotate("text", x = 0.5, y = all_occ_sep_rate,
+           label = paste0("All occ sep rate: ", all_occ_sep_rate, "%"),
+           hjust = -0.05, vjust = -0.5, size = 3.2, color = "gray30") +
+  labs(
+    title    = paste0("Separation Rates by SHRS Occupation (", CYCLE, ")"),
+    subtitle = "Annual average rate (%) | Dashed = all-occupations benchmark",
+    x = NULL, y = "Rate (%)", fill = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+## 2.3 Openings & Separations Table
+
+```{r openings-table}
+proj |>
+  mutate(
+    openings_signal = case_when(
+      annual_openings >= 10 ~ "🟢 High Volume",
+      annual_openings >= 3  ~ "🟢 Solid",
+      annual_openings >= 1  ~ "🟡 Moderate",
+      TRUE                  ~ "🔴 Limited"
+    ),
+    replacement_signal = case_when(
+      total_sep_rate >= 6 ~ "🟢 High Replacement",
+      total_sep_rate >= 4 ~ "🟡 Moderate",
+      TRUE                ~ "🔴 Low"
+    )
+  ) |>
+  select(
+    Program         = shrs_program,
+    `Exit Rate (%)`     = lf_exit_rate,
+    `Transfer Rate (%)` = occ_transfer_rate,
+    `Total Sep Rate (%)` = total_sep_rate,
+    `Openings/yr (K)`   = annual_openings,
+    `Openings Signal`   = openings_signal,
+    `Replacement Signal` = replacement_signal
+  ) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 3 — Market Size & Scale Analysis
+
+## 3.1 Size vs Growth Scatter
+
+```{r scale-scatter, fig.height=6}
+proj |>
+  mutate(
+    market_size = case_when(
+      emp_base >= 200 ~ "Large (≥200K)",
+      emp_base >= 50  ~ "Mid-size (50–200K)",
+      emp_base >= 20  ~ "Small (20–50K)",
+      TRUE            ~ "Niche (<20K)"
+    ),
+    market_size = factor(market_size,
+                          levels = c("Large (≥200K)", "Mid-size (50–200K)",
+                                     "Small (20–50K)", "Niche (<20K)"))
+  ) |>
+  ggplot(aes(x = emp_base, y = emp_change_pct,
+             color = market_size, label = shrs_program)) +
+  geom_point(size = 5) +
+  geom_text(vjust = -1.2, size = 4, fontface = "bold") +
+  geom_hline(yintercept = all_occ_growth_pct, linetype = "dashed",
+             color = "gray40") +
+  scale_color_manual(values = c(
+    "Large (≥200K)"      = "#1a9850",
+    "Mid-size (50–200K)" = "#4393c3",
+    "Small (20–50K)"     = "#fee08b",
+    "Niche (<20K)"       = "#d73027"
+  )) +
+  scale_x_continuous(labels = comma) +
+  labs(
+    title    = paste0("Market Size vs Growth Rate — SHRS Programs (", CYCLE, ")"),
+    subtitle = "Dashed line = all-occupations growth benchmark",
+    x = paste0(base_yr, " Employment (thousands)"), y = "Projected Growth (%)",
+    color = "Market Size"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+## 3.2 Openings Intensity
+
+```{r openings-intensity}
+proj |>
+  mutate(openings_intensity = round(annual_openings / emp_base * 1000, 1)) |>
+  ggplot(aes(x = reorder(shrs_program, openings_intensity),
+             y = openings_intensity,
+             fill = if_else(openings_intensity >= 70, "High", "Normal"))) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = openings_intensity), hjust = -0.15, size = 3.8) +
+  coord_flip() +
+  scale_fill_manual(values = c("High" = "#1a9850", "Normal" = "#4393c3"),
+                     guide = "none") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.2))) +
+  labs(
+    title    = "Openings Intensity: Annual Openings per 1,000 Current Workers",
+    subtitle = paste0(CYCLE, " cycle | Higher = more churn relative to workforce"),
+    x = NULL, y = "Openings per 1,000 workers"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+---
+
+# 4 — Program-Level Scorecard (0–100 Scale)
+
+```{r scorecard-compute}
+rescale_0_100 <- function(x) {
+  rng <- range(x, na.rm = TRUE)
+  if (rng[2] == rng[1]) return(rep(50, length(x)))
+  round((x - rng[1]) / (rng[2] - rng[1]) * 100, 1)
+}
+
+scorecard <- proj |>
+  mutate(
+    growth_score     = rescale_0_100(emp_change_pct),
+    openings_score   = rescale_0_100(annual_openings),
+    sep_rate_score   = rescale_0_100(total_sep_rate),
+    emp_scale_score  = rescale_0_100(emp_base),
+    composite_score  = round((growth_score + openings_score +
+                               sep_rate_score + emp_scale_score) / 4, 1),
+    health_signal = case_when(
+      composite_score >= 65 ~ "Green",
+      composite_score >= 40 ~ "Yellow",
+      TRUE                  ~ "Red"
+    ),
+    health_signal = factor(health_signal, levels = c("Green", "Yellow", "Red"))
+  )
+```
+
+## 4.1 Scorecard Heatmap
+
+```{r scorecard-heatmap, fig.height=6, fig.width=10}
+scorecard |>
+  select(shrs_program, growth_score, openings_score,
+         sep_rate_score, emp_scale_score) |>
+  pivot_longer(-shrs_program, names_to = "dimension", values_to = "score") |>
+  mutate(dimension = case_when(
+    dimension == "growth_score"    ~ "Projected Growth",
+    dimension == "openings_score"  ~ "Annual Openings",
+    dimension == "sep_rate_score"  ~ "Replacement Demand",
+    dimension == "emp_scale_score" ~ "Market Size"
+  )) |>
+  ggplot(aes(x = shrs_program, y = dimension, fill = score)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  geom_text(aes(label = score), size = 4, fontface = "bold") +
+  scale_fill_gradient2(low = "#d73027", mid = "#fee08b", high = "#1a9850",
+                        midpoint = 50, limits = c(0, 100),
+                        name = "Score\n(0–100)") +
+  labs(
+    title    = paste0("Market Demand Scorecard — SHRS Programs (", CYCLE, ")"),
+    subtitle = "0 = weakest across programs | 100 = strongest | Min-max scaled",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(face = "bold", angle = 30, hjust = 1),
+        panel.grid = element_blank())
+```
+
+## 4.2 Composite Score Bar Chart
+
+```{r composite-bar, fig.height=5}
+scorecard |>
+  ggplot(aes(x = reorder(shrs_program, composite_score), y = composite_score,
+             fill = health_signal)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = composite_score), hjust = -0.15, size = 4,
+            fontface = "bold") +
+  coord_flip() +
+  scale_fill_manual(values = c("Green" = "#1a9850", "Yellow" = "#fee08b",
+                                "Red" = "#d73027")) +
+  scale_y_continuous(limits = c(0, 105), expand = expansion(mult = c(0, 0))) +
+  labs(
+    title    = paste0("Composite Market Score by SHRS Program (", CYCLE, ")"),
+    subtitle = "Equal-weighted average of Growth, Openings, Replacement, and Scale",
+    x = NULL, y = "Composite Score (0–100)", fill = "Health"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+## 4.3 Full Scorecard Table
+
+```{r scorecard-table}
+scorecard |>
+  select(
+    Program          = shrs_program,
+    Dept             = shrs_dept,
+    `Growth (%)`     = emp_change_pct,
+    `Openings/yr (K)` = annual_openings,
+    `Sep Rate (%)`   = total_sep_rate,
+    `Emp Base (K)`   = emp_base,
+    `Growth Sc`      = growth_score,
+    `Open Sc`        = openings_score,
+    `Sep Sc`         = sep_rate_score,
+    `Scale Sc`       = emp_scale_score,
+    `Composite`      = composite_score,
+    Signal           = health_signal
+  ) |>
+  arrange(desc(Composite)) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 5 — Key Statistical Summaries
+
+```{r stats-summary}
+cat("===", CYCLE, "Projection Cycle: Descriptive Statistics ===\n\n")
+
+cat("Growth Rate (%):\n")
+cat("  Mean:", round(mean(proj$emp_change_pct), 2), "\n")
+cat("  Median:", round(median(proj$emp_change_pct), 2), "\n")
+cat("  SD:", round(sd(proj$emp_change_pct), 2), "\n")
+cat("  Range:", min(proj$emp_change_pct), "to",
+    max(proj$emp_change_pct), "\n\n")
+
+cat("Annual Openings (thousands):\n")
+cat("  Mean:", round(mean(proj$annual_openings), 2), "\n")
+cat("  Median:", round(median(proj$annual_openings), 2), "\n")
+cat("  Total:", round(sum(proj$annual_openings), 2), "\n\n")
+
+cat("Separation Rate (%):\n")
+cat("  Mean:", round(mean(proj$total_sep_rate), 2), "\n")
+cat("  Range:", min(proj$total_sep_rate), "to",
+    max(proj$total_sep_rate), "\n\n")
+
+above <- sum(proj$emp_change_pct >= all_occ_growth_pct)
+below <- sum(proj$emp_change_pct < all_occ_growth_pct)
+cat("Programs above all-occ benchmark:", above, "of 9\n")
+cat("Programs below all-occ benchmark:", below, "of 9\n")
+```
+
+## 5.1 Correlations
+
+```{r corr-analysis}
+cor_growth_openings <- cor(proj$emp_change_pct, proj$annual_openings,
+                            use = "complete.obs")
+cor_growth_sep <- cor(proj$emp_change_pct, proj$total_sep_rate,
+                       use = "complete.obs")
+
+cat("Correlation (Growth % ↔ Annual Openings):", round(cor_growth_openings, 3), "\n")
+cat("Correlation (Growth % ↔ Sep Rate):", round(cor_growth_sep, 3), "\n")
+```
+
+---
+
+# 6 — Stored Outputs for Downstream Modules
+
+```{r stored-outputs}
+proj_2021_data       <- proj
+scorecard_2021_data  <- scorecard
+
+benchmark_2021 <- list(
+  cycle             = CYCLE,
+  all_occ_growth    = all_occ_growth_pct,
+  all_occ_sep_rate  = all_occ_sep_rate,
+  all_occ_openings  = all_occ_openings
+)
+
+summary_stats_2021 <- list(
+  growth_mean     = round(mean(proj$emp_change_pct), 2),
+  growth_median   = round(median(proj$emp_change_pct), 2),
+  growth_sd       = round(sd(proj$emp_change_pct), 2),
+  openings_total  = round(sum(proj$annual_openings), 2),
+  openings_mean   = round(mean(proj$annual_openings), 2),
+  sep_rate_mean   = round(mean(proj$total_sep_rate), 2),
+  n_above_bench   = sum(proj$emp_change_pct >= all_occ_growth_pct),
+  n_below_bench   = sum(proj$emp_change_pct < all_occ_growth_pct),
+  cor_growth_open = round(cor_growth_openings, 3),
+  cor_growth_sep  = round(cor_growth_sep, 3)
+)
+
+program_signals_2021 <- scorecard |>
+  select(shrs_program, shrs_dept, composite_score, health_signal,
+         emp_change_pct, annual_openings, total_sep_rate, emp_base)
+
+soc_crosswalk_9 <- soc_crosswalk
+
+cat("=== Stored Objects (", CYCLE, ") ===\n\n")
+cat("Data Frames:\n")
+cat("  proj_2021_data         —", nrow(proj_2021_data), "rows ×",
+    ncol(proj_2021_data), "cols\n")
+cat("  scorecard_2021_data    —", nrow(scorecard_2021_data), "rows ×",
+    ncol(scorecard_2021_data), "cols\n")
+cat("  program_signals_2021   —", nrow(program_signals_2021), "rows\n\n")
+cat("Lists:\n")
+cat("  benchmark_2021         — all-occ growth:",
+    benchmark_2021$all_occ_growth, "%\n")
+cat("  summary_stats_2021     — SHRS avg growth:",
+    summary_stats_2021$growth_mean, "%\n\n")
+cat("Crosswalk:\n")
+cat("  soc_crosswalk_9        —", nrow(soc_crosswalk_9), "programs\n")
+```
+
+---
+
+# Appendix: Data Source & Methodology
+
+**Source:** BLS Employment Projections — National Employment Matrix, 2021–2031
+(`occupation_2021.csv`)
+
+**SOC note:** 2021 is the first cycle to separately report 29-9021 (Health
+Information Technologists and Medical Registrars). Prior cycles used combined
+codes 29-2071 or 29-2098.
+
+**Scorecard:** 4 dimensions min-max scaled 0–100 across 9 SHRS programs.
+Composite = equal-weighted average. Health: Green (≥65), Yellow (40–64), Red (<40).
+
+**All 9 programs:** SLP, AuD, HIM, OTD, DPT, PAS, AT, DN, SS
