@@ -1,0 +1,702 @@
+---
+title: "SHRS Market Analysis — Detailed Industry Employment (2022 Vintage)"
+subtitle: "BLS Employment Projections Table 2.11 · 2022–2032 Cycle"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+# 0 — Setup
+
+```{r packages}
+library(tidyverse)
+library(scales)
+library(knitr)
+library(kableExtra)
+```
+
+```{r config}
+soc_crosswalk <- tribble(
+  ~shrs_program, ~shrs_dept, ~soc_code,  ~occupation_title,
+  "SLP",         "CSD",      "29-1127",  "Speech-Language Pathologists",
+  "AuD",         "CSD",      "29-1181",  "Audiologists",
+  "HIM",         "HIM",      "29-9021",  "Health Information Technologists and Medical Registrars",
+  "OTD",         "RST",      "29-1122",  "Occupational Therapists",
+  "DPT",         "RST",      "29-1123",  "Physical Therapists",
+  "PAS",         "PAS",      "29-1071",  "Physician Assistants",
+  "AT",          "SMN",      "29-9091",  "Athletic Trainers",
+  "DN",          "SMN",      "29-1031",  "Dietitians and Nutritionists",
+  "SS",          "SMN",      "29-1128",  "Exercise Physiologists"
+)
+
+DATA_PATH <- "/Users/gpps/Documents/SHRS_Analysis/market_analysis/v3data/projections_csv/industry_csv/2022/2022_industry-2022 - Table 2.11.csv"
+
+VINTAGE <- 2022
+CYCLE   <- "2022-2032"
+
+# NAICS mapping — 2022 uses SHORT NAICS codes (e.g., "6213" not "621300")
+# Also does NOT break out 621340 — only goes to 4-digit level for therapy offices
+shrs_naics <- tribble(
+  ~naics_code, ~naics_label,                                              ~shrs_relevance,
+  "62",        "Health care and social assistance",                       "Umbrella sector",
+  "621",       "Ambulatory health care services",                         "Primary outpatient umbrella",
+  "6211",      "Offices of physicians",                                   "PAS, DN setting",
+  "6213",      "Offices of other health practitioners",                   "Umbrella for SLP, AuD, OTD, DPT, AT",
+  "6214",      "Outpatient care centers",                                 "Multi-program setting",
+  "6215",      "Medical and diagnostic laboratories",                     "HIM potential",
+  "6216",      "Home health care services",                               "SLP, OTD, DPT, DN home health",
+  "6219",      "Other ambulatory health care services",                   "AT, SS primary",
+  "622",       "Hospitals",                                               "All SHRS programs",
+  "623",       "Nursing and residential care facilities",                 "SLP, OTD, DPT, DN — SNF/LTC",
+  "624",       "Social assistance",                                       "SLP (early intervention), DN"
+)
+```
+
+```{r helpers}
+clean_num <- function(x) {
+  x <- str_remove_all(x, ",")
+  x <- str_replace_all(x, "\u2014|\u2013|--|-", NA_character_)
+  as.numeric(x)
+}
+```
+
+---
+
+# 1 — Load & Clean Data
+
+**CRITICAL STRUCTURAL DIFFERENCES** from 2023/2024 vintages:
+
+1. **14 columns** (not 11): includes historical employment (2012), historical change,
+   and historical CAGR in addition to projected data
+2. **No explicit percent-change column** — must compute from numeric change and base
+3. **Blank separator rows** between sections
+4. **NAICS shorthand codes** (e.g., `6213` not `621300`, `622` not `622000`)
+5. **Does NOT break out NAICS 621340** — the most granular therapy industry data is
+   at `6213` (all "other health practitioners"), which includes chiropractors,
+   optometrists, mental health, AND PT/OT/SLP/AuD combined
+6. Uses `NA` text string for some NAICS codes of non-standard rows
+
+**Column layout (14 columns):**
+
+| Pos | Content |
+|-----|---------|
+| 1 | Industry name + NAICS code |
+| 2 | Employment, 2012 (thousands) |
+| 3 | Employment, 2022 (thousands) |
+| 4 | Employment, 2032 (thousands) |
+| 5 | Employment change, 2012–22 (numeric) |
+| 6 | Employment change, 2022–32 (numeric) |
+| 7 | CAGR, employment, 2012–22 |
+| 8 | CAGR, employment, 2022–32 |
+| 9 | Output, 2012 (billions $) |
+| 10 | Output, 2022 (billions $) |
+| 11 | Output, 2032 (billions $) |
+| 12 | CAGR, output, 2012–22 |
+| 13 | CAGR, output, 2022–32 |
+
+**Wait** — the header shows 14 columns but column 1 is "Industry, 2022 NAICS"
+which is a single column containing both the title and the NAICS code, separated
+by a comma within the cell. Let me parse carefully.
+
+```{r load-data}
+raw <- read_csv(DATA_PATH, col_types = cols(.default = "c"), col_names = FALSE)
+
+# This vintage has a composite first column ("Industry, 2022 NAICS")
+# but it's actually TWO logical columns packed into the CSV header
+# Let's check the actual column count
+n_cols <- ncol(raw)
+cat("Actual columns in CSV:", n_cols, "\n")
+
+# Column names by position — adapt based on what we see
+if (n_cols == 14) {
+  colnames(raw) <- c(
+    "industry_title", "naics_code",
+    "emp_hist", "emp_base", "emp_proj",
+    "emp_change_hist", "emp_change_proj",
+    "cagr_hist", "cagr_proj",
+    "output_hist", "output_base", "output_proj",
+    "output_cagr_hist", "output_cagr_proj"
+  )
+} else {
+  # Fallback: treat as 13 columns with embedded NAICS
+  colnames(raw) <- paste0("V", 1:n_cols)
+  cat("WARNING: Unexpected column count. Manual inspection needed.\n")
+}
+
+# Drop header row
+raw <- raw[-1, ]
+
+# Clean footnote markers
+raw <- raw %>%
+  mutate(industry_title = str_remove_all(industry_title, "\\(\\d+\\)|\\[\\d+\\]") %>%
+           str_trim())
+
+# Remove blank separator rows
+raw <- raw %>%
+  filter(!is.na(industry_title) & industry_title != "")
+
+# Clean NAICS codes (sometimes "NA" text, sometimes actual codes)
+raw <- raw %>%
+  mutate(naics_code = str_trim(naics_code),
+         naics_code = if_else(naics_code == "NA", NA_character_, naics_code))
+
+# Convert numeric columns
+df <- raw %>%
+  mutate(across(-c(industry_title, naics_code), clean_num))
+
+# Compute percent change (not provided in this vintage)
+df <- df %>%
+  mutate(
+    emp_pct_hist = round((emp_change_hist / emp_hist) * 100, 1),
+    emp_pct_proj = round((emp_change_proj / emp_base) * 100, 1)
+  )
+
+cat("Loaded", nrow(df), "rows for", CYCLE, "cycle (after cleaning)\n")
+```
+
+```{r preview}
+df %>%
+  head(15) %>%
+  select(industry_title, naics_code, emp_base, emp_proj, emp_pct_proj, cagr_proj) %>%
+  kable(digits = 1, format.args = list(big.mark = ","),
+        caption = "Table 2.11 Preview (growth % computed)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 2 — Benchmarks
+
+```{r benchmarks}
+# Total row — labeled "Total, all industries" in this vintage
+total_row <- df %>%
+  filter(str_detect(industry_title, regex("^Total.*all industries", ignore_case = TRUE))) %>%
+  slice(1)
+
+total_emp  <- total_row$emp_base
+total_pct  <- total_row$emp_pct_proj
+total_cagr <- total_row$cagr_proj
+
+# Healthcare — labeled "Health care and social assistance" with NAICS "62"
+hc_row <- df %>%
+  filter(naics_code == "62" |
+         str_detect(industry_title, regex("^Health care and social assistance$",
+                                          ignore_case = TRUE))) %>%
+  slice(1)
+
+hc_emp_base <- hc_row$emp_base
+hc_emp_proj <- hc_row$emp_proj
+hc_pct      <- hc_row$emp_pct_proj
+hc_cagr     <- hc_row$cagr_proj
+
+cat("Benchmarks (", CYCLE, "):\n")
+cat("  Total economy growth:   ", total_pct, "% | CAGR ", total_cagr, "%\n")
+cat("  HC & Social Assistance: ", hc_pct, "% | CAGR ", hc_cagr, "%\n")
+cat("  HC/Total ratio:         ", round(hc_pct / total_pct, 2), "x\n")
+```
+
+---
+
+# 3 — SHRS-Relevant Industries
+
+**Important limitation for this vintage:** The 2022 data uses **4-digit NAICS**
+as its finest granularity for therapy practices. NAICS 6213 ("Offices of other
+health practitioners") includes chiropractors, optometrists, mental health
+practitioners, PT/OT/SLP/AuD, and all other practitioners combined. This means
+we cannot isolate NAICS 621340 (therapy offices) as we can in 2023/2024 vintages.
+
+Similarly, 6219 ("Other ambulatory health care services") is the combined total
+that includes ambulance services and other ambulatory HC — we cannot isolate 621990.
+
+```{r shrs-industries}
+shrs_ind <- df %>%
+  filter(naics_code %in% shrs_naics$naics_code) %>%
+  left_join(shrs_naics, by = "naics_code") %>%
+  mutate(
+    growth_vs_total = round(emp_pct_proj - total_pct, 1),
+    growth_vs_hc    = round(emp_pct_proj - hc_pct, 1)
+  )
+
+cat("Found", nrow(shrs_ind), "of", nrow(shrs_naics), "target SHRS industries\n")
+```
+
+```{r shrs-table}
+shrs_ind %>%
+  select(
+    Industry          = industry_title,
+    NAICS             = naics_code,
+    `Emp 2012 (K)`    = emp_hist,
+    `Emp 2022 (K)`    = emp_base,
+    `Emp 2032 (K)`    = emp_proj,
+    `Hist Growth (%)`  = emp_pct_hist,
+    `Proj Growth (%)`  = emp_pct_proj,
+    `CAGR (%)`         = cagr_proj,
+    `vs Total (pp)`    = growth_vs_total,
+    `vs HC (pp)`       = growth_vs_hc
+  ) %>%
+  kable(digits = 1, format.args = list(big.mark = ","),
+        caption = paste0("SHRS-Relevant Industries (", CYCLE, ") — 4-digit NAICS")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r growth-chart, fig.height=7}
+shrs_ind %>%
+  filter(!is.na(emp_pct_proj)) %>%
+  mutate(
+    short_name = case_when(
+      naics_code == "62"   ~ "HC & Social Assist (total)",
+      naics_code == "621"  ~ "Ambulatory HC (total)",
+      naics_code == "6211" ~ "Physician offices",
+      naics_code == "6213" ~ "Other health practitioners*",
+      naics_code == "6214" ~ "Outpatient care centers",
+      naics_code == "6215" ~ "Medical & diagnostic labs",
+      naics_code == "6216" ~ "Home health care services",
+      naics_code == "6219" ~ "Other ambulatory HC*",
+      naics_code == "622"  ~ "Hospitals",
+      naics_code == "623"  ~ "Nursing & residential care",
+      naics_code == "624"  ~ "Social assistance",
+      TRUE ~ str_trunc(industry_title, 35)
+    ),
+    is_primary = naics_code %in% c("6213", "6219")
+  ) %>%
+  ggplot(aes(x = reorder(short_name, emp_pct_proj), y = emp_pct_proj,
+             fill = is_primary)) +
+  geom_col(width = 0.65) +
+  geom_hline(yintercept = total_pct, linetype = "dashed",
+             color = "gray40", linewidth = 0.6) +
+  geom_hline(yintercept = hc_pct, linetype = "dotted",
+             color = "#d7191c", linewidth = 0.6) +
+  annotate("text", x = 2, y = total_pct + 0.3,
+           label = paste0("All industries: ", total_pct, "%"),
+           hjust = 0, size = 3, color = "gray40") +
+  annotate("text", x = 1, y = hc_pct + 0.3,
+           label = paste0("HC sector: ", hc_pct, "%"),
+           hjust = 0, size = 3, color = "#d7191c") +
+  geom_text(aes(label = paste0(emp_pct_proj, "%")), hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_fill_manual(values = c("FALSE" = "#2c7bb6", "TRUE" = "#d7191c"),
+                    labels = c("Other HC industries",
+                               "SHRS-primary industries (4-digit)"),
+                    name = NULL) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.2))) +
+  labs(
+    title = paste0("Projected Growth in SHRS Industries (", CYCLE, ")"),
+    subtitle = "* = 4-digit NAICS (broader than 2023/2024 breakouts); Red = primary SHRS industries",
+    x = NULL, y = "Projected Growth (%)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+---
+
+# 4 — Primary SHRS Industry Deep-Dive
+
+## 4.1 NAICS 6213: Offices of Other Health Practitioners
+
+**IMPORTANT:** In the 2022 vintage, this is the **broadest available** proxy for
+NAICS 621340 (therapy offices). It includes chiropractors, optometrists, mental
+health practitioners, AND PT/OT/SLP/AuD offices.
+
+```{r ind-6213}
+ind_6213 <- df %>% filter(naics_code == "6213")
+
+if (nrow(ind_6213) > 0) {
+  cat("NAICS 6213 — Offices of Other Health Practitioners\n")
+  cat("  NOTE: Broader than 621340; includes chiro, optom, mental health + therapy\n")
+  cat("  Emp (2012):        ", comma(ind_6213$emp_hist * 1000), "\n")
+  cat("  Emp (", VINTAGE, "):    ", comma(ind_6213$emp_base * 1000), "\n")
+  cat("  Proj (", VINTAGE+10, "):  ", comma(ind_6213$emp_proj * 1000), "\n")
+  cat("  Hist growth:       ", ind_6213$emp_pct_hist, "%\n")
+  cat("  Proj growth:       ", ind_6213$emp_pct_proj, "%\n")
+  cat("  CAGR:              ", ind_6213$cagr_proj, "%\n")
+  cat("  vs Total:          +", round(ind_6213$emp_pct_proj - total_pct, 1), " pp\n")
+}
+```
+
+## 4.2 NAICS 6219: Other Ambulatory Health Care Services
+
+Broader proxy for NAICS 621990.
+
+```{r ind-6219}
+ind_6219 <- df %>% filter(naics_code == "6219")
+
+if (nrow(ind_6219) > 0) {
+  cat("NAICS 6219 — Other Ambulatory Health Care Services\n")
+  cat("  NOTE: Broader than 621990; includes ambulance services\n")
+  cat("  Emp (", VINTAGE, "):    ", comma(ind_6219$emp_base * 1000), "\n")
+  cat("  Proj (", VINTAGE+10, "):  ", comma(ind_6219$emp_proj * 1000), "\n")
+  cat("  Proj growth:       ", ind_6219$emp_pct_proj, "%\n")
+  cat("  CAGR:              ", ind_6219$cagr_proj, "%\n")
+}
+```
+
+## 4.3 Historical vs Projected Growth
+
+This vintage uniquely provides **both** historical (2012–2022) and projected
+(2022–2032) growth, enabling a momentum analysis.
+
+```{r hist-vs-proj, fig.height=6}
+momentum <- shrs_ind %>%
+  filter(!is.na(emp_pct_hist), !is.na(emp_pct_proj),
+         !naics_code %in% c("62", "621")) %>%
+  mutate(
+    short_name = case_when(
+      naics_code == "6211" ~ "Physician offices",
+      naics_code == "6213" ~ "Other health pract.",
+      naics_code == "6214" ~ "Outpatient centers",
+      naics_code == "6215" ~ "Medical labs",
+      naics_code == "6216" ~ "Home health care",
+      naics_code == "6219" ~ "Other ambulatory HC",
+      naics_code == "622"  ~ "Hospitals",
+      naics_code == "623"  ~ "Nursing & residential",
+      naics_code == "624"  ~ "Social assistance",
+      TRUE ~ str_trunc(industry_title, 25)
+    ),
+    momentum = emp_pct_proj - emp_pct_hist,
+    direction = if_else(momentum >= 0, "Accelerating", "Decelerating")
+  )
+
+momentum %>%
+  select(short_name, emp_pct_hist, emp_pct_proj) %>%
+  pivot_longer(-short_name, names_to = "period", values_to = "growth") %>%
+  mutate(period = if_else(period == "emp_pct_hist", "2012-2022", "2022-2032")) %>%
+  ggplot(aes(x = short_name, y = growth, fill = period)) +
+  geom_col(position = "dodge", width = 0.6) +
+  geom_hline(yintercept = 0, color = "gray40") +
+  coord_flip() +
+  scale_fill_manual(values = c("2012-2022" = "#abd9e9", "2022-2032" = "#2c7bb6")) +
+  labs(
+    title = "Historical vs Projected Growth: SHRS Industries",
+    subtitle = paste0(CYCLE, " vintage — are industries accelerating or decelerating?"),
+    x = NULL, y = "Employment Growth (%)", fill = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+```{r momentum-table}
+momentum %>%
+  select(
+    Industry          = short_name,
+    `Hist Growth (%)`  = emp_pct_hist,
+    `Proj Growth (%)`  = emp_pct_proj,
+    Momentum           = momentum,
+    Direction          = direction
+  ) %>%
+  arrange(desc(Momentum)) %>%
+  kable(digits = 1,
+        caption = "Growth Momentum: Historical → Projected") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 4.4 Output (Revenue) Trends
+
+```{r output-analysis}
+output_ind <- shrs_ind %>%
+  filter(!is.na(output_base), !is.na(output_proj),
+         !naics_code %in% c("62")) %>%
+  mutate(
+    output_change = output_proj - output_base,
+    output_pct    = round((output_change / output_base) * 100, 1),
+    short_name = case_when(
+      naics_code == "621"  ~ "Ambulatory HC",
+      naics_code == "6211" ~ "Physician offices",
+      naics_code == "6213" ~ "Other health pract.",
+      naics_code == "6214" ~ "Outpatient centers",
+      naics_code == "6215" ~ "Medical labs",
+      naics_code == "6216" ~ "Home health care",
+      naics_code == "6219" ~ "Other ambulatory HC",
+      naics_code == "622"  ~ "Hospitals",
+      naics_code == "623"  ~ "Nursing & residential",
+      naics_code == "624"  ~ "Social assistance",
+      TRUE ~ str_trunc(industry_title, 25)
+    )
+  )
+
+if (nrow(output_ind) > 0) {
+  output_ind %>%
+    ggplot(aes(x = reorder(short_name, output_cagr_proj), y = output_cagr_proj)) +
+    geom_col(width = 0.6, fill = "#1a9641") +
+    geom_text(aes(label = paste0(output_cagr_proj, "%")), hjust = -0.1, size = 3.5) +
+    coord_flip() +
+    labs(
+      title = paste0("Output (Revenue) CAGR for SHRS Industries (", CYCLE, ")"),
+      x = NULL, y = "Output CAGR (%)"
+    ) +
+    theme_minimal(base_size = 12)
+}
+```
+
+---
+
+# 5 — HC Sub-Sector Composition
+
+Note: The 2022 vintage uniquely **combines** hospitals and nursing care
+("622, 623") in some summary rows, but also provides them separately.
+
+```{r hc-composition, fig.height=6}
+hc_sub <- df %>%
+  filter(naics_code %in% c("621", "622", "623", "624")) %>%
+  mutate(subsector = case_when(
+    naics_code == "621" ~ "Ambulatory HC",
+    naics_code == "622" ~ "Hospitals",
+    naics_code == "623" ~ "Nursing & Residential",
+    naics_code == "624" ~ "Social Assistance"
+  ))
+
+hc_sub %>%
+  select(subsector, emp_base, emp_proj) %>%
+  pivot_longer(-subsector, names_to = "period", values_to = "emp") %>%
+  mutate(period = if_else(period == "emp_base",
+                          as.character(VINTAGE), as.character(VINTAGE + 10))) %>%
+  ggplot(aes(x = period, y = emp, fill = subsector)) +
+  geom_col(width = 0.5) +
+  geom_text(aes(label = comma(emp, accuracy = 0.1)),
+            position = position_stack(vjust = 0.5), size = 3.5, color = "white") +
+  scale_fill_manual(values = c("Ambulatory HC" = "#2c7bb6",
+                                "Hospitals" = "#abd9e9",
+                                "Nursing & Residential" = "#fdae61",
+                                "Social Assistance" = "#d7191c")) +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = paste0("HC Sub-Sector Composition (", CYCLE, ")"),
+    x = NULL, y = "Employment (thousands)", fill = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+
+hc_sub %>%
+  ggplot(aes(x = reorder(subsector, emp_pct_proj), y = emp_pct_proj,
+             fill = subsector)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(emp_pct_proj, "%")), hjust = -0.1, size = 4) +
+  geom_hline(yintercept = hc_pct, linetype = "dashed", color = "gray50") +
+  coord_flip() +
+  scale_fill_manual(values = c("Ambulatory HC" = "#2c7bb6",
+                                "Hospitals" = "#abd9e9",
+                                "Nursing & Residential" = "#fdae61",
+                                "Social Assistance" = "#d7191c")) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.2))) +
+  labs(
+    title = paste0("HC Sub-Sector Growth Rates (", CYCLE, ")"),
+    subtitle = paste0("Dashed = total HC (", hc_pct, "%)"),
+    x = NULL, y = "Projected Growth (%)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+---
+
+# 6 — Program-to-Industry Scorecard (0–100)
+
+**Note:** Because this vintage only provides 4-digit NAICS, programs that map
+to 621340 are mapped to 6213 (broader), and programs mapping to 621990 are
+mapped to 6219 (broader). Scores will be slightly different from 2023/2024 due
+to this aggregation.
+
+```{r program-map}
+program_map <- tribble(
+  ~shrs_program, ~primary_naics, ~primary_label,
+  "SLP",         "6213",         "Other health practitioners (incl. therapy)*",
+  "AuD",         "6213",         "Other health practitioners (incl. therapy)*",
+  "HIM",         "622",          "Hospitals",
+  "OTD",         "6213",         "Other health practitioners (incl. therapy)*",
+  "DPT",         "6213",         "Other health practitioners (incl. therapy)*",
+  "PAS",         "6211",         "Physician offices",
+  "AT",          "6219",         "Other ambulatory HC (incl. ambulance)*",
+  "DN",          "6211",         "Physician offices",
+  "SS",          "6219",         "Other ambulatory HC (incl. ambulance)*"
+)
+
+program_ind <- program_map %>%
+  left_join(
+    df %>% select(naics_code, emp_base, emp_proj, emp_change_proj,
+                  emp_pct_proj, cagr_proj),
+    by = c("primary_naics" = "naics_code")
+  ) %>%
+  mutate(
+    growth_score = case_when(
+      emp_pct_proj >= hc_pct * 2    ~ 100,
+      emp_pct_proj >= hc_pct * 1.5  ~ 90,
+      emp_pct_proj >= hc_pct        ~ 80,
+      emp_pct_proj >= total_pct * 2 ~ 70,
+      emp_pct_proj >= total_pct     ~ 60,
+      emp_pct_proj >= 0             ~ 40,
+      TRUE                          ~ 20
+    ),
+    size_score = case_when(
+      emp_base >= 3000 ~ 100,
+      emp_base >= 1000 ~ 85,
+      emp_base >= 500  ~ 70,
+      emp_base >= 200  ~ 55,
+      emp_base >= 100  ~ 40,
+      TRUE             ~ 25
+    ),
+    cagr_score = case_when(
+      cagr_proj >= 2.0 ~ 100,
+      cagr_proj >= 1.5 ~ 85,
+      cagr_proj >= 1.0 ~ 70,
+      cagr_proj >= 0.5 ~ 55,
+      cagr_proj >= 0.0 ~ 40,
+      TRUE             ~ 20
+    ),
+    composite_score = round((growth_score + size_score + cagr_score) / 3, 0),
+    signal = case_when(
+      composite_score >= 70 ~ "Green",
+      composite_score >= 50 ~ "Yellow",
+      TRUE                  ~ "Red"
+    )
+  )
+```
+
+```{r scorecard-table}
+program_ind %>%
+  arrange(desc(composite_score)) %>%
+  select(
+    Program        = shrs_program,
+    Industry       = primary_label,
+    `Emp (K)`      = emp_base,
+    `Growth (%)`   = emp_pct_proj,
+    `CAGR (%)`     = cagr_proj,
+    `Gr Score`     = growth_score,
+    `Sz Score`     = size_score,
+    `CAGR Score`   = cagr_score,
+    Composite      = composite_score,
+    Signal         = signal
+  ) %>%
+  kable(digits = 1, format.args = list(big.mark = ","),
+        caption = paste0("Program Industry Scorecard (", CYCLE,
+                          ") — * = broader 4-digit NAICS proxy")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+  column_spec(10, bold = TRUE)
+```
+
+```{r scorecard-heatmap, fig.height=5}
+program_ind %>%
+  select(shrs_program, growth_score, size_score, cagr_score) %>%
+  pivot_longer(-shrs_program, names_to = "dimension", values_to = "score") %>%
+  mutate(dimension = case_when(
+    dimension == "growth_score" ~ "Industry Growth",
+    dimension == "size_score"   ~ "Industry Size",
+    dimension == "cagr_score"   ~ "Industry CAGR"
+  )) %>%
+  ggplot(aes(x = shrs_program, y = dimension, fill = score)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = score), size = 4, fontface = "bold") +
+  scale_fill_gradient2(low = "#dc3545", mid = "#ffc107", high = "#28a745",
+                        midpoint = 60, limits = c(0, 100),
+                        name = "Score\n(0-100)") +
+  labs(
+    title = paste0("Industry Health Heatmap (", CYCLE, ")"),
+    subtitle = "Green >= 70 | Yellow 50-69 | Red < 50 | * = 4-digit NAICS proxy",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(face = "bold"), panel.grid = element_blank())
+```
+
+```{r composite-bar, fig.height=5}
+program_ind %>%
+  ggplot(aes(x = reorder(shrs_program, composite_score), y = composite_score,
+             fill = signal)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = composite_score), hjust = -0.2, size = 4.5, fontface = "bold") +
+  geom_hline(yintercept = 70, linetype = "dashed", color = "#155724", linewidth = 0.5) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "#856404", linewidth = 0.5) +
+  coord_flip() +
+  scale_fill_manual(values = c("Green" = "#28a745", "Yellow" = "#ffc107",
+                                "Red" = "#dc3545")) +
+  scale_y_continuous(limits = c(0, 110)) +
+  labs(
+    title = paste0("Industry Composite Score by SHRS Program (", CYCLE, ")"),
+    x = NULL, y = "Composite Score (0-100)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+---
+
+# 7 — Vintage Comparison Notes
+
+Key differences from 2023/2024 vintages that affect cross-vintage analysis:
+
+```{r vintage-notes, results='asis'}
+cat("1. **NAICS granularity**: 2022 uses 4-digit NAICS (6213, 6219) while 2023/2024\n")
+cat("   break out 6-digit (621340, 621390, 621990). Therapy offices are mixed with\n")
+cat("   chiropractors, optometrists, and mental health in the 2022 data.\n\n")
+cat("2. **Growth % computed**: 2022 lacks explicit percent-change columns. Values\n")
+cat("   are computed as `change / base * 100` and may differ slightly from BLS\n")
+cat("   reported values due to rounding.\n\n")
+cat("3. **Historical data available**: 2022 uniquely provides 2012–2022 historical\n")
+cat("   growth alongside projections, enabling momentum analysis.\n\n")
+cat("4. **Hospitals + Nursing combined**: Some summary rows in the raw data combine\n")
+cat("   NAICS 622 and 623 into a single row, but individual rows also exist.\n\n")
+cat("5. **Nursing care decline**: NAICS 623 shows negative historical growth\n")
+cat("   (-0.6% CAGR), partially recovering in projections — reflects SNF industry\n")
+cat("   restructuring and post-COVID challenges.\n")
+```
+
+---
+
+# 8 — Stored Outputs
+
+```{r stored-outputs}
+ind_t211_2022_vintage        <- VINTAGE
+ind_t211_2022_cycle          <- CYCLE
+ind_t211_2022_total_pct      <- total_pct
+ind_t211_2022_total_cagr     <- total_cagr
+ind_t211_2022_hc_pct         <- hc_pct
+ind_t211_2022_hc_cagr        <- hc_cagr
+ind_t211_2022_hc_emp         <- hc_emp_base
+ind_t211_2022_shrs_ind       <- shrs_ind
+ind_t211_2022_ind_6213       <- ind_6213    # 4-digit proxy for 621340
+ind_t211_2022_ind_6219       <- ind_6219    # 4-digit proxy for 621990
+ind_t211_2022_program_scores <- program_ind
+ind_t211_2022_hc_subsectors  <- hc_sub
+ind_t211_2022_momentum       <- momentum
+ind_t211_2022_full_df        <- df
+ind_t211_2022_naics_note     <- "2022 uses 4-digit NAICS; 621340/621990 not available — use 6213/6219 as proxies"
+```
+
+```{r output-registry}
+output_registry <- tribble(
+  ~variable,                           ~description,
+  "ind_t211_2022_vintage",             "Vintage year (2022)",
+  "ind_t211_2022_cycle",               "Projection cycle (2022-2032)",
+  "ind_t211_2022_total_pct",           "Total economy projected growth % (computed)",
+  "ind_t211_2022_total_cagr",          "Total economy CAGR %",
+  "ind_t211_2022_hc_pct",              "Healthcare sector projected growth % (computed)",
+  "ind_t211_2022_hc_cagr",             "Healthcare sector CAGR %",
+  "ind_t211_2022_hc_emp",              "Healthcare employment, base year (thousands)",
+  "ind_t211_2022_shrs_ind",            "SHRS-relevant industries dataframe (4-digit NAICS)",
+  "ind_t211_2022_ind_6213",            "NAICS 6213 row (Other health practitioners — proxy for 621340)",
+  "ind_t211_2022_ind_6219",            "NAICS 6219 row (Other ambulatory HC — proxy for 621990)",
+  "ind_t211_2022_program_scores",      "Program-to-industry scorecard (9 programs, 0-100)",
+  "ind_t211_2022_hc_subsectors",       "HC sub-sector composition",
+  "ind_t211_2022_momentum",            "Historical vs projected growth momentum analysis",
+  "ind_t211_2022_full_df",             "Complete Table 2.11 dataframe",
+  "ind_t211_2022_naics_note",          "Note: 4-digit NAICS only — 621340/621990 unavailable"
+)
+
+output_registry %>%
+  kable(caption = "Output Variable Registry — industry_t211_2022.Rmd") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```

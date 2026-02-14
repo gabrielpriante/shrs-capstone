@@ -1,0 +1,601 @@
+---
+title: "SHRS Market Analysis — Detailed Industry Employment (2024 Vintage)"
+subtitle: "BLS Employment Projections Table 2.11 · 2024–2034 Cycle"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+# 0 — Setup
+
+```{r packages}
+library(tidyverse)
+library(scales)
+library(knitr)
+library(kableExtra)
+```
+
+```{r config}
+soc_crosswalk <- tribble(
+  ~shrs_program, ~shrs_dept, ~soc_code,  ~occupation_title,
+  "SLP",         "CSD",      "29-1127",  "Speech-Language Pathologists",
+  "AuD",         "CSD",      "29-1181",  "Audiologists",
+  "HIM",         "HIM",      "29-9021",  "Health Information Technologists and Medical Registrars",
+  "OTD",         "RST",      "29-1122",  "Occupational Therapists",
+  "DPT",         "RST",      "29-1123",  "Physical Therapists",
+  "PAS",         "PAS",      "29-1071",  "Physician Assistants",
+  "AT",          "SMN",      "29-9091",  "Athletic Trainers",
+  "DN",          "SMN",      "29-1031",  "Dietitians and Nutritionists",
+  "SS",          "SMN",      "29-1128",  "Exercise Physiologists"
+)
+
+DATA_PATH <- "/Users/gpps/Documents/SHRS_Analysis/market_analysis/v3data/projections_csv/industry_csv/2024/2024_industry - Table 2.11.csv"
+
+VINTAGE <- 2024
+CYCLE   <- "2024-2034"
+
+shrs_naics <- tribble(
+  ~naics_code, ~naics_label,                                                    ~shrs_relevance,
+  "620000",    "Healthcare and social assistance",                              "Umbrella sector",
+  "621000",    "Ambulatory healthcare services",                                "Primary outpatient umbrella",
+  "621100",    "Offices of physicians",                                         "PAS, DN setting",
+  "621300",    "Offices of other health practitioners",                         "Therapy/audiology umbrella",
+  "621340",    "Offices of PT, OT, SLP, and audiologists",                      "Primary for SLP, AuD, OTD, DPT",
+  "621390",    "Offices of all other health practitioners",                     "AT, SS, HIM potential",
+  "621400",    "Outpatient care centers",                                       "Multi-program setting",
+  "621600",    "Home healthcare services",                                      "SLP, OTD, DPT, DN home health",
+  "621900",    "Other ambulatory healthcare services",                          "AT, SS umbrella",
+  "621990",    "All other ambulatory healthcare services",                      "AT, SS primary",
+  "622000",    "Hospitals",                                                     "All SHRS programs",
+  "623000",    "Nursing and residential care facilities",                       "SLP, OTD, DPT, DN — SNF/LTC",
+  "624000",    "Social assistance",                                             "SLP (early intervention), DN"
+)
+```
+
+```{r helpers}
+clean_num <- function(x) {
+  x <- str_remove_all(x, ",")
+  x <- str_replace_all(x, "\u2014|\u2013|--|-", NA_character_)
+  as.numeric(x)
+}
+```
+
+---
+
+# 1 — Load & Clean Data
+
+Table 2.11 provides **detailed industry employment** at the 4-digit and 6-digit
+NAICS level — the most granular industry data from BLS projections.
+
+**Column layout (2024 vintage, 11 columns):**
+
+| Pos | Content |
+|-----|---------|
+| 1 | Industry title |
+| 2 | National Employment Matrix code |
+| 3 | Industry type (Summary / Line item) |
+| 4 | Employment, 2024 (thousands) |
+| 5 | Employment, 2034 (thousands) |
+| 6 | Employment change, numeric, 2024–34 |
+| 7 | Employment change, percent, 2024–34 |
+| 8 | CAGR, employment |
+| 9 | Output, 2024 (billions $) |
+| 10 | Output, 2034 (billions $) |
+| 11 | CAGR, output |
+
+```{r load-data}
+raw <- read_csv(DATA_PATH, col_types = cols(.default = "c"), col_names = FALSE)
+
+colnames(raw) <- c(
+  "industry_title", "matrix_code", "industry_type",
+  "emp_base", "emp_proj",
+  "emp_change", "emp_pct_change", "emp_cagr",
+  "output_base", "output_proj", "output_cagr"
+)
+
+raw <- raw[-1, ]
+
+raw <- raw %>%
+  mutate(industry_title = str_remove_all(industry_title, "\\(\\d+\\)|\\[\\d+\\]") %>%
+           str_trim())
+
+df <- raw %>%
+  mutate(across(-c(industry_title, matrix_code, industry_type), clean_num))
+
+cat("Loaded", nrow(df), "detailed industry rows for", CYCLE, "cycle\n")
+```
+
+```{r preview}
+df %>%
+  head(10) %>%
+  select(industry_title, matrix_code, emp_base, emp_proj, emp_pct_change) %>%
+  kable(digits = 1, format.args = list(big.mark = ","),
+        caption = "Table 2.11 Preview") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 2 — Benchmarks
+
+```{r benchmarks}
+total_row <- df %>% filter(str_detect(matrix_code, "^TE1000")) %>% slice(1)
+total_emp      <- total_row$emp_base
+total_pct      <- total_row$emp_pct_change
+total_cagr     <- total_row$emp_cagr
+
+hc_row <- df %>% filter(matrix_code == "620000") %>% slice(1)
+hc_emp_base    <- hc_row$emp_base
+hc_emp_proj    <- hc_row$emp_proj
+hc_pct         <- hc_row$emp_pct_change
+hc_cagr        <- hc_row$emp_cagr
+
+cat("Benchmarks (", CYCLE, "):\n")
+cat("  Total economy growth:   ", total_pct, "% | CAGR ", total_cagr, "%\n")
+cat("  HC & Social Assistance: ", hc_pct, "% | CAGR ", hc_cagr, "%\n")
+cat("  HC/Total ratio:         ", round(hc_pct / total_pct, 2), "x\n")
+```
+
+---
+
+# 3 — SHRS-Relevant Industries
+
+## 3.1 Extract & Table
+
+```{r shrs-industries}
+shrs_ind <- df %>%
+  filter(matrix_code %in% shrs_naics$naics_code) %>%
+  left_join(shrs_naics, by = c("matrix_code" = "naics_code")) %>%
+  mutate(
+    growth_vs_total = round(emp_pct_change - total_pct, 1),
+    growth_vs_hc    = round(emp_pct_change - hc_pct, 1)
+  )
+
+cat("Found", nrow(shrs_ind), "of", nrow(shrs_naics), "target SHRS industries\n")
+```
+
+```{r shrs-table}
+shrs_ind %>%
+  select(
+    Industry         = industry_title,
+    Code             = matrix_code,
+    `Emp 2024 (K)`   = emp_base,
+    `Emp 2034 (K)`   = emp_proj,
+    `Change (K)`     = emp_change,
+    `Growth (%)`     = emp_pct_change,
+    `CAGR (%)`       = emp_cagr,
+    `vs Total (pp)`  = growth_vs_total,
+    `vs HC (pp)`     = growth_vs_hc
+  ) %>%
+  kable(digits = 1, format.args = list(big.mark = ","),
+        caption = paste0("SHRS-Relevant Industries (", CYCLE, ")")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 3.2 Growth Chart
+
+```{r growth-chart, fig.height=8}
+shrs_ind %>%
+  filter(!is.na(emp_pct_change)) %>%
+  mutate(
+    short_name = case_when(
+      matrix_code == "620000" ~ "HC & Social Assist (total)",
+      matrix_code == "621000" ~ "Ambulatory HC (total)",
+      matrix_code == "621100" ~ "Physician offices",
+      matrix_code == "621300" ~ "Other health practitioners",
+      matrix_code == "621340" ~ "PT/OT/SLP/AuD offices",
+      matrix_code == "621390" ~ "All other practitioners",
+      matrix_code == "621400" ~ "Outpatient care centers",
+      matrix_code == "621600" ~ "Home health services",
+      matrix_code == "621900" ~ "Other ambulatory HC",
+      matrix_code == "621990" ~ "All other ambulatory HC",
+      matrix_code == "622000" ~ "Hospitals",
+      matrix_code == "623000" ~ "Nursing & residential care",
+      matrix_code == "624000" ~ "Social assistance",
+      TRUE ~ str_trunc(industry_title, 35)
+    ),
+    is_primary = matrix_code %in% c("621340", "621990")
+  ) %>%
+  ggplot(aes(x = reorder(short_name, emp_pct_change), y = emp_pct_change,
+             fill = is_primary)) +
+  geom_col(width = 0.65) +
+  geom_hline(yintercept = total_pct, linetype = "dashed",
+             color = "gray40", linewidth = 0.6) +
+  geom_hline(yintercept = hc_pct, linetype = "dotted",
+             color = "#d7191c", linewidth = 0.6) +
+  annotate("text", x = 2, y = total_pct + 0.3,
+           label = paste0("All industries: ", total_pct, "%"),
+           hjust = 0, size = 3, color = "gray40") +
+  annotate("text", x = 1, y = hc_pct + 0.3,
+           label = paste0("HC sector: ", hc_pct, "%"),
+           hjust = 0, size = 3, color = "#d7191c") +
+  geom_text(aes(label = paste0(emp_pct_change, "%")), hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_fill_manual(values = c("FALSE" = "#2c7bb6", "TRUE" = "#d7191c"),
+                    labels = c("Other HC industries", "Primary SHRS industries"),
+                    name = NULL) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.2))) +
+  labs(
+    title = paste0("Projected Growth in SHRS-Relevant Industries (", CYCLE, ")"),
+    subtitle = "Red = primary SHRS employment industries (621340, 621990)",
+    x = NULL, y = "Projected Growth (%)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+## 3.3 Employment Size
+
+```{r size-chart, fig.height=7}
+shrs_ind %>%
+  filter(!is.na(emp_base), !matrix_code %in% c("620000", "621000")) %>%
+  mutate(
+    short_name = case_when(
+      matrix_code == "621100" ~ "Physician offices",
+      matrix_code == "621300" ~ "Other health practitioners",
+      matrix_code == "621340" ~ "PT/OT/SLP/AuD offices",
+      matrix_code == "621390" ~ "All other practitioners",
+      matrix_code == "621400" ~ "Outpatient care centers",
+      matrix_code == "621600" ~ "Home health services",
+      matrix_code == "621900" ~ "Other ambulatory HC",
+      matrix_code == "621990" ~ "All other ambulatory HC",
+      matrix_code == "622000" ~ "Hospitals",
+      matrix_code == "623000" ~ "Nursing & residential",
+      matrix_code == "624000" ~ "Social assistance",
+      TRUE ~ str_trunc(industry_title, 30)
+    )
+  ) %>%
+  ggplot(aes(x = reorder(short_name, emp_base), y = emp_base)) +
+  geom_col(width = 0.6, fill = "#2c7bb6") +
+  geom_text(aes(label = comma(emp_base, accuracy = 0.1)),
+            hjust = -0.05, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.2))) +
+  labs(
+    title = paste0("Employment Size in SHRS Industries (", VINTAGE, ", thousands)"),
+    x = NULL, y = "Employment (thousands)"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+---
+
+# 4 — Primary SHRS Industry Deep-Dive
+
+## 4.1 NAICS 621340: PT/OT/SLP/AuD Offices
+
+Primary industry for SLP, AuD, OTD, DPT.
+
+```{r ind-621340}
+ind_621340 <- df %>% filter(matrix_code == "621340")
+
+if (nrow(ind_621340) > 0) {
+  cat("NAICS 621340\n")
+  cat("  Emp (", VINTAGE, "):    ", comma(ind_621340$emp_base * 1000), "\n")
+  cat("  Proj (", VINTAGE+10, "):  ", comma(ind_621340$emp_proj * 1000), "\n")
+  cat("  Growth:            ", ind_621340$emp_pct_change, "%\n")
+  cat("  CAGR:              ", ind_621340$emp_cagr, "%\n")
+  cat("  vs Total:          +", round(ind_621340$emp_pct_change - total_pct, 1), " pp\n")
+  cat("  vs HC sector:      +", round(ind_621340$emp_pct_change - hc_pct, 1), " pp\n")
+}
+```
+
+## 4.2 NAICS 621990: All Other Ambulatory HC
+
+Primary industry for AT and SS.
+
+```{r ind-621990}
+ind_621990 <- df %>% filter(matrix_code == "621990")
+
+if (nrow(ind_621990) > 0) {
+  cat("NAICS 621990\n")
+  cat("  Emp (", VINTAGE, "):    ", comma(ind_621990$emp_base * 1000), "\n")
+  cat("  Proj (", VINTAGE+10, "):  ", comma(ind_621990$emp_proj * 1000), "\n")
+  cat("  Growth:            ", ind_621990$emp_pct_change, "%\n")
+  cat("  CAGR:              ", ind_621990$emp_cagr, "%\n")
+}
+```
+
+## 4.3 Output (Revenue) Trends
+
+```{r output-analysis}
+output_ind <- shrs_ind %>%
+  filter(!is.na(output_base), !is.na(output_proj),
+         !matrix_code %in% c("620000")) %>%
+  mutate(
+    output_change = output_proj - output_base,
+    output_pct    = round((output_change / output_base) * 100, 1),
+    short_name = case_when(
+      matrix_code == "621000" ~ "Ambulatory HC",
+      matrix_code == "621100" ~ "Physician offices",
+      matrix_code == "621400" ~ "Outpatient centers",
+      matrix_code == "621600" ~ "Home health",
+      matrix_code == "623000" ~ "Nursing & residential",
+      matrix_code == "624000" ~ "Social assistance",
+      TRUE ~ str_trunc(industry_title, 25)
+    )
+  )
+
+if (nrow(output_ind) > 0) {
+  output_ind %>%
+    ggplot(aes(x = reorder(short_name, output_cagr), y = output_cagr)) +
+    geom_col(width = 0.6, fill = "#1a9641") +
+    geom_text(aes(label = paste0(output_cagr, "%")), hjust = -0.1, size = 3.5) +
+    coord_flip() +
+    labs(
+      title = paste0("Output (Revenue) CAGR for SHRS Industries (", CYCLE, ")"),
+      subtitle = "Compound annual growth rate of industry output (billions $)",
+      x = NULL, y = "Output CAGR (%)"
+    ) +
+    theme_minimal(base_size = 12)
+}
+```
+
+---
+
+# 5 — HC Sub-Sector Composition
+
+```{r hc-composition, fig.height=6}
+hc_sub <- df %>%
+  filter(matrix_code %in% c("621000", "622000", "623000", "624000")) %>%
+  mutate(subsector = case_when(
+    matrix_code == "621000" ~ "Ambulatory HC",
+    matrix_code == "622000" ~ "Hospitals",
+    matrix_code == "623000" ~ "Nursing & Residential",
+    matrix_code == "624000" ~ "Social Assistance"
+  ))
+
+hc_sub %>%
+  select(subsector, emp_base, emp_proj) %>%
+  pivot_longer(-subsector, names_to = "period", values_to = "emp") %>%
+  mutate(period = if_else(period == "emp_base",
+                          as.character(VINTAGE), as.character(VINTAGE + 10))) %>%
+  ggplot(aes(x = period, y = emp, fill = subsector)) +
+  geom_col(width = 0.5) +
+  geom_text(aes(label = comma(emp, accuracy = 0.1)),
+            position = position_stack(vjust = 0.5), size = 3.5, color = "white") +
+  scale_fill_manual(values = c("Ambulatory HC" = "#2c7bb6",
+                                "Hospitals" = "#abd9e9",
+                                "Nursing & Residential" = "#fdae61",
+                                "Social Assistance" = "#d7191c")) +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = paste0("HC Sub-Sector Composition (", CYCLE, ")"),
+    x = NULL, y = "Employment (thousands)", fill = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+
+hc_sub %>%
+  ggplot(aes(x = reorder(subsector, emp_pct_change), y = emp_pct_change,
+             fill = subsector)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(emp_pct_change, "%")), hjust = -0.1, size = 4) +
+  geom_hline(yintercept = hc_pct, linetype = "dashed", color = "gray50") +
+  coord_flip() +
+  scale_fill_manual(values = c("Ambulatory HC" = "#2c7bb6",
+                                "Hospitals" = "#abd9e9",
+                                "Nursing & Residential" = "#fdae61",
+                                "Social Assistance" = "#d7191c")) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.2))) +
+  labs(
+    title = paste0("HC Sub-Sector Growth Rates (", CYCLE, ")"),
+    subtitle = paste0("Dashed = total HC (", hc_pct, "%)"),
+    x = NULL, y = "Projected Growth (%)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+---
+
+# 6 — Program-to-Industry Scorecard (0–100)
+
+```{r program-map}
+program_map <- tribble(
+  ~shrs_program, ~primary_naics, ~primary_label,
+  "SLP",         "621340",       "PT/OT/SLP/AuD offices",
+  "AuD",         "621340",       "PT/OT/SLP/AuD offices",
+  "HIM",         "622000",       "Hospitals",
+  "OTD",         "621340",       "PT/OT/SLP/AuD offices",
+  "DPT",         "621340",       "PT/OT/SLP/AuD offices",
+  "PAS",         "621100",       "Physician offices",
+  "AT",          "621990",       "All other ambulatory HC",
+  "DN",          "621100",       "Physician offices",
+  "SS",          "621990",       "All other ambulatory HC"
+)
+
+program_ind <- program_map %>%
+  left_join(
+    df %>% select(matrix_code, emp_base, emp_proj, emp_change,
+                  emp_pct_change, emp_cagr),
+    by = c("primary_naics" = "matrix_code")
+  )
+```
+
+```{r industry-scorecard}
+program_ind <- program_ind %>%
+  mutate(
+    growth_score = case_when(
+      emp_pct_change >= hc_pct * 2    ~ 100,
+      emp_pct_change >= hc_pct * 1.5  ~ 90,
+      emp_pct_change >= hc_pct        ~ 80,
+      emp_pct_change >= total_pct * 2 ~ 70,
+      emp_pct_change >= total_pct     ~ 60,
+      emp_pct_change >= 0             ~ 40,
+      TRUE                            ~ 20
+    ),
+    size_score = case_when(
+      emp_base >= 3000 ~ 100,
+      emp_base >= 1000 ~ 85,
+      emp_base >= 500  ~ 70,
+      emp_base >= 200  ~ 55,
+      emp_base >= 100  ~ 40,
+      TRUE             ~ 25
+    ),
+    cagr_score = case_when(
+      emp_cagr >= 2.0 ~ 100,
+      emp_cagr >= 1.5 ~ 85,
+      emp_cagr >= 1.0 ~ 70,
+      emp_cagr >= 0.5 ~ 55,
+      emp_cagr >= 0.0 ~ 40,
+      TRUE            ~ 20
+    ),
+    composite_score = round((growth_score + size_score + cagr_score) / 3, 0),
+    signal = case_when(
+      composite_score >= 70 ~ "Green",
+      composite_score >= 50 ~ "Yellow",
+      TRUE                  ~ "Red"
+    )
+  )
+```
+
+```{r scorecard-table}
+program_ind %>%
+  arrange(desc(composite_score)) %>%
+  select(
+    Program        = shrs_program,
+    Industry       = primary_label,
+    `Emp (K)`      = emp_base,
+    `Growth (%)`   = emp_pct_change,
+    `CAGR (%)`     = emp_cagr,
+    `Gr Score`     = growth_score,
+    `Sz Score`     = size_score,
+    `CAGR Score`   = cagr_score,
+    Composite      = composite_score,
+    Signal         = signal
+  ) %>%
+  kable(digits = 1, format.args = list(big.mark = ","),
+        caption = paste0("Program Industry Health Scorecard (", CYCLE, ")")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+  column_spec(10, bold = TRUE)
+```
+
+```{r scorecard-heatmap, fig.height=5}
+program_ind %>%
+  select(shrs_program, growth_score, size_score, cagr_score) %>%
+  pivot_longer(-shrs_program, names_to = "dimension", values_to = "score") %>%
+  mutate(dimension = case_when(
+    dimension == "growth_score" ~ "Industry Growth",
+    dimension == "size_score"   ~ "Industry Size",
+    dimension == "cagr_score"   ~ "Industry CAGR"
+  )) %>%
+  ggplot(aes(x = shrs_program, y = dimension, fill = score)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = score), size = 4, fontface = "bold") +
+  scale_fill_gradient2(low = "#dc3545", mid = "#ffc107", high = "#28a745",
+                        midpoint = 60, limits = c(0, 100),
+                        name = "Score\n(0-100)") +
+  labs(
+    title = paste0("Industry Health Heatmap by SHRS Program (", CYCLE, ")"),
+    subtitle = "Green >= 70 | Yellow 50-69 | Red < 50",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(face = "bold"), panel.grid = element_blank())
+```
+
+```{r composite-bar, fig.height=5}
+program_ind %>%
+  ggplot(aes(x = reorder(shrs_program, composite_score), y = composite_score,
+             fill = signal)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = composite_score), hjust = -0.2, size = 4.5, fontface = "bold") +
+  geom_hline(yintercept = 70, linetype = "dashed", color = "#155724", linewidth = 0.5) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "#856404", linewidth = 0.5) +
+  coord_flip() +
+  scale_fill_manual(values = c("Green" = "#28a745", "Yellow" = "#ffc107",
+                                "Red" = "#dc3545")) +
+  scale_y_continuous(limits = c(0, 110)) +
+  labs(
+    title = paste0("Industry Composite Score by SHRS Program (", CYCLE, ")"),
+    subtitle = "Average of Growth, Size, and CAGR scores (0-100)",
+    x = NULL, y = "Composite Score (0-100)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+---
+
+# 7 — Key Findings
+
+```{r findings, results='asis'}
+fastest <- shrs_ind %>%
+  filter(!matrix_code %in% c("620000", "621000")) %>%
+  slice_max(emp_pct_change, n = 1)
+largest <- shrs_ind %>%
+  filter(!matrix_code %in% c("620000", "621000")) %>%
+  slice_max(emp_base, n = 1)
+
+cat("\n## Industry Environment Summary\n\n")
+cat(paste0("- **Fastest-growing SHRS industry**: ", fastest$industry_title,
+           " (", fastest$emp_pct_change, "%)\n"))
+cat(paste0("- **Largest SHRS employer**: ", largest$industry_title,
+           " (", comma(largest$emp_base), "K)\n"))
+cat(paste0("- **621340 (PT/OT/SLP/AuD)**: ",
+           ind_621340$emp_pct_change, "% growth — ",
+           round(ind_621340$emp_pct_change / total_pct, 1), "x total economy\n"))
+cat(paste0("- **621990 (Other ambulatory HC)**: ",
+           ind_621990$emp_pct_change, "% growth\n"))
+cat(paste0("- **HC sector overall**: ", hc_pct, "% growth (",
+           round(hc_pct / total_pct, 1), "x total economy)\n"))
+```
+
+---
+
+# 8 — Stored Outputs
+
+```{r stored-outputs}
+ind_t211_2024_vintage       <- VINTAGE
+ind_t211_2024_cycle         <- CYCLE
+ind_t211_2024_total_pct     <- total_pct
+ind_t211_2024_total_cagr    <- total_cagr
+ind_t211_2024_hc_pct        <- hc_pct
+ind_t211_2024_hc_cagr       <- hc_cagr
+ind_t211_2024_hc_emp        <- hc_emp_base
+ind_t211_2024_shrs_ind      <- shrs_ind
+ind_t211_2024_ind_621340    <- ind_621340
+ind_t211_2024_ind_621990    <- ind_621990
+ind_t211_2024_program_scores <- program_ind
+ind_t211_2024_hc_subsectors  <- hc_sub
+ind_t211_2024_full_df        <- df
+```
+
+```{r output-registry}
+output_registry <- tribble(
+  ~variable,                          ~description,
+  "ind_t211_2024_vintage",            "Vintage year (2024)",
+  "ind_t211_2024_cycle",              "Projection cycle (2024-2034)",
+  "ind_t211_2024_total_pct",          "Total economy projected growth %",
+  "ind_t211_2024_total_cagr",         "Total economy CAGR %",
+  "ind_t211_2024_hc_pct",             "Healthcare sector projected growth %",
+  "ind_t211_2024_hc_cagr",            "Healthcare sector CAGR %",
+  "ind_t211_2024_hc_emp",             "Healthcare employment, base year (thousands)",
+  "ind_t211_2024_shrs_ind",           "SHRS-relevant industries dataframe with growth metrics",
+  "ind_t211_2024_ind_621340",         "NAICS 621340 row (PT/OT/SLP/AuD offices)",
+  "ind_t211_2024_ind_621990",         "NAICS 621990 row (All other ambulatory HC)",
+  "ind_t211_2024_program_scores",     "Program-to-industry scorecard (9 programs, 0-100 composite)",
+  "ind_t211_2024_hc_subsectors",      "HC sub-sector composition (ambulatory, hospitals, nursing, social)",
+  "ind_t211_2024_full_df",            "Complete Table 2.11 dataframe (all industries)"
+)
+
+output_registry %>%
+  kable(caption = "Output Variable Registry — industry_t211_2024.Rmd") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
