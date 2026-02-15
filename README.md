@@ -6,7 +6,6 @@
 <img width="515" height="359" alt="Program Health Dashboard Vision" src="https://github.com/user-attachments/assets/6830f6ce-dd89-4ed5-9f30-3e5a6e3613f3" />
 
 *The image above represents our target outcome: a comprehensive Program Health Dashboard that will enable data-driven decision-making for SHRS leadership.*
-Prototype: https://gabrielpriante.github.io/shrs-capstone/analysis/market_v3/projections_analysis/projections_dashboard.html
 
 ## Project Background & Problem Statement
 
@@ -313,6 +312,7 @@ This project was conducted as part of the MQE capstone requirement at the Univer
 *Last Updated: January 2026*
 
 **Repository Purpose**: This is a methodological and analytical framework repository, not a data repository. All analyses reference external data sources due to confidentiality requirements.
+Prototype: https://gabrielpriante.github.io/shrs-capstone/analysis/market_v3/projections_analysis/projections_dashboard.html
 
 
 
