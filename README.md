@@ -1,10 +1,12 @@
 # SHRS MQE Capstone Project: Program Health Analysis
 
+
 ## Our Vision: The Program Health Dashboard
 
 <img width="515" height="359" alt="Program Health Dashboard Vision" src="https://github.com/user-attachments/assets/6830f6ce-dd89-4ed5-9f30-3e5a6e3613f3" />
 
 *The image above represents our target outcome: a comprehensive Program Health Dashboard that will enable data-driven decision-making for SHRS leadership.*
+Prototype: https://gabrielpriante.github.io/shrs-capstone/analysis/market_v3/projections_analysis/projections_dashboard.html
 
 ## Project Background & Problem Statement
 
