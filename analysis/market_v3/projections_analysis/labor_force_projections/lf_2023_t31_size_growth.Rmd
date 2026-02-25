@@ -1,0 +1,208 @@
+---
+title: "SHRS Market Analysis — 2023 Labor Force Size & Growth (Table 3.1)"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, message=FALSE, warning=FALSE, fig.width=10, fig.height=6)
+```
+
+```{r packages}
+library(tidyverse); library(scales); library(knitr); library(kableExtra)
+```
+
+# 0 — Configuration
+
+```{r config}
+VINTAGE <- "2023"
+YR1 <- 2003; YR2 <- 2013; YR3 <- 2023; YR4 <- 2033
+PROJ_LABEL <- paste0(YR3, "-", YR4)
+
+CSV_PATH <- file.path(path.expand("~"), "Documents", "SHRS_Analysis",
+                       "market_analysis", "v3data", "projections_csv",
+                       "labor_force_csv", "2023",
+                       "2023labor-force - Table 3.1.csv")
+
+signal_colors <- c("Green"="#27ae60","Yellow"="#f39c12","Red"="#e74c3c")
+```
+
+# 1 — Load & Clean
+
+```{r load}
+raw <- read_csv(CSV_PATH, show_col_types = FALSE)
+
+names(raw) <- c("group",
+                "lf_yr1","lf_yr2","lf_yr3","lf_yr4",
+                "chg_12","chg_23","chg_34",
+                "pct_chg_12","pct_chg_23","pct_chg_34",
+                "dist_yr1","dist_yr2","dist_yr3","dist_yr4",
+                "cagr_12","cagr_23","cagr_34")
+
+clean_num <- function(x) {
+  x <- str_remove_all(as.character(x), ",")
+  x[x %in% c("\u2014","\u2013","-","NA","")] <- NA
+  suppressWarnings(as.numeric(x))
+}
+
+raw <- raw |>
+  mutate(group = str_trim(group)) |>
+  filter(group != "", !is.na(group)) |>
+  mutate(across(-group, clean_num))
+```
+
+```{r dq, results='asis'}
+cat(paste0("**Vintage:** ", VINTAGE, " | **Projection:** ", PROJ_LABEL,
+           " | **Rows:** ", nrow(raw), "\n"))
+```
+
+---
+
+# 2 — Total Labor Force Overview
+
+```{r total}
+total <- raw |> filter(str_detect(group, "^Total"))
+
+tibble(
+  Metric = c(paste0("LF ",YR1," (000s)"), paste0("LF ",YR2," (000s)"),
+             paste0("LF ",YR3," (000s)"), paste0("LF ",YR4," projected (000s)"),
+             paste0("Growth ",YR1,"-",YR2," (%)"), paste0("Growth ",YR2,"-",YR3," (%)"),
+             paste0("Growth ",YR3,"-",YR4," (%)"), paste0("CAGR ",YR3,"-",YR4," (%)")),
+  Value = c(total$lf_yr1, total$lf_yr2, total$lf_yr3, total$lf_yr4,
+            total$pct_chg_12, total$pct_chg_23, total$pct_chg_34, total$cagr_34)
+) |>
+  mutate(Value = ifelse(abs(Value)>100, format(Value,big.mark=","), as.character(round(Value,1)))) |>
+  kable(caption = "Total Labor Force Summary") |>
+  kable_styling(bootstrap_options=c("striped","hover"), full_width=FALSE)
+
+lf_growth_pct <- total$pct_chg_34
+lf_cagr       <- total$cagr_34
+lf_current    <- total$lf_yr3
+lf_projected  <- total$lf_yr4
+```
+
+---
+
+# 3 — Growth Deceleration Trend
+
+```{r growth-trend, fig.height=5}
+tibble(
+  Period = factor(c(paste0(YR1,"-",YR2), paste0(YR2,"-",YR3), paste0(YR3,"-",YR4)),
+                  levels = c(paste0(YR1,"-",YR2), paste0(YR2,"-",YR3), paste0(YR3,"-",YR4))),
+  Growth = c(total$pct_chg_12, total$pct_chg_23, total$pct_chg_34),
+  Type = c("Historical","Historical","Projected")
+) |>
+  ggplot(aes(x=Period, y=Growth, fill=Type)) +
+  geom_col(width=0.5) +
+  geom_text(aes(label=paste0(Growth,"%")), vjust=-0.3, size=4.5) +
+  scale_fill_manual(values=c("Historical"="#2c7bb6","Projected"="#f39c12")) +
+  labs(title=paste0("Labor Force Growth Across Decades (",VINTAGE," Vintage)"),
+       subtitle="Decelerating growth = tighter labor markets for healthcare employers",
+       x=NULL, y="Percent Change", fill=NULL) +
+  theme_minimal(base_size=13) + theme(legend.position="bottom")
+```
+
+---
+
+# 4 — Demographic Composition
+
+## 4.1 Gender
+
+```{r gender}
+gender <- raw |> filter(str_detect(group, "^Men, 16|^Women, 16"))
+
+gender |>
+  select(Group=group, !!paste0("LF ",YR3):=lf_yr3, !!paste0("LF ",YR4):=lf_yr4,
+         `Growth (%)`=pct_chg_34, !!paste0("Share ",YR3):=dist_yr3,
+         !!paste0("Share ",YR4):=dist_yr4) |>
+  kable(digits=1, caption="Labor Force by Gender") |>
+  kable_styling(bootstrap_options=c("striped","hover"), full_width=FALSE)
+```
+
+## 4.2 Race/Ethnicity
+
+```{r race, fig.height=5}
+race <- raw |>
+  filter(str_detect(group, "^White|^Black|^All other groups|^Hispanic origin,|^Hispanic origin$|^Other than Hispanic"))
+
+if (nrow(race) > 0) {
+  race |>
+    select(Group=group, !!paste0("LF ",YR3," (K)"):=lf_yr3, `Growth (%)`=pct_chg_34,
+           !!paste0("Share ",YR3):=dist_yr3, !!paste0("Share ",YR4):=dist_yr4) |>
+    kable(digits=1, caption="Labor Force by Race/Ethnicity") |>
+    kable_styling(bootstrap_options=c("striped","hover"), full_width=FALSE)
+
+  race |>
+    mutate(group_short = str_remove_all(group, ",?\\s*16 years and older|\\[\\d+\\]|\\(\\d+\\)") |> str_trim()) |>
+    ggplot(aes(x=reorder(group_short, pct_chg_34), y=pct_chg_34, fill=pct_chg_34>0)) +
+    geom_col(width=0.5) +
+    geom_text(aes(label=paste0(pct_chg_34,"%")), hjust=-0.1, size=4) +
+    coord_flip() +
+    scale_fill_manual(values=c("TRUE"="#27ae60","FALSE"="#e74c3c"), guide="none") +
+    labs(title=paste0("Projected LF Growth by Race/Ethnicity (",PROJ_LABEL,")"),
+         x=NULL, y="Growth (%)") +
+    theme_minimal(base_size=13)
+}
+```
+
+## 4.3 Age Structure
+
+```{r age}
+age <- raw |>
+  filter(str_detect(group, "^\\s*\\d+\\s+to\\s+\\d+|^\\s*55 and|^\\s*65 and|^\\s*75 and")) |>
+  mutate(group = str_trim(group))
+
+if (nrow(age) > 0) {
+  age |>
+    select(Age=group, !!paste0("LF ",YR3):=lf_yr3, !!paste0("LF ",YR4):=lf_yr4,
+           `Growth (%)`=pct_chg_34) |>
+    kable(digits=1, caption="Age Group Projections") |>
+    kable_styling(bootstrap_options=c("striped","hover"), full_width=FALSE)
+}
+```
+
+---
+
+# 5 — Key Benchmarks
+
+```{r benchmarks, results='asis'}
+cat(paste0("- <span style='color:#2c7bb6;'>**Projected LF growth ",PROJ_LABEL,":**</span> ",
+           lf_growth_pct, "%\n"))
+cat(paste0("- <span style='color:#2c7bb6;'>**CAGR:**</span> ", lf_cagr, "%\n"))
+cat(paste0("- <span style='color:#2c7bb6;'>**LF ",YR3,":**</span> ",
+           format(lf_current, big.mark=","), " thousand\n"))
+cat(paste0("- <span style='color:#2c7bb6;'>**LF ",YR4," (proj):**</span> ",
+           format(lf_projected, big.mark=","), " thousand\n"))
+```
+
+---
+
+# 6 — Stored Outputs
+
+```{r store}
+lf_t31_2023_raw       <- raw
+lf_t31_2023_total     <- total
+lf_t31_2023_gender    <- gender
+lf_t31_2023_race      <- if(exists("race")) race else NULL
+lf_t31_2023_age       <- if(exists("age")) age else NULL
+lf_t31_2023_benchmarks <- list(
+  growth_pct = lf_growth_pct, cagr = lf_cagr,
+  current = lf_current, projected = lf_projected,
+  yr3 = YR3, yr4 = YR4
+)
+```
+
+```{r catalog, results='asis'}
+cat("| Variable | Description |\n|---|---|\n")
+cat(paste0("| `lf_t31_2023_raw` | Full T3.1 (",nrow(raw)," rows) |\n"))
+cat("| `lf_t31_2023_total` | Total LF row |\n")
+cat("| `lf_t31_2023_benchmarks` | Key benchmarks (list) |\n")
+```
+
+**Source:** BLS Table 3.1, 2023 vintage. Projection: 2023-2033.

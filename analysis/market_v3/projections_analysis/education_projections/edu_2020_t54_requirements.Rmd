@@ -1,0 +1,301 @@
+---
+title: "SHRS Education Analysis — 2020 Entry Requirements & Training (Table 5.4)"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+```{r packages}
+library(tidyverse)
+library(scales)
+library(knitr)
+library(kableExtra)
+```
+
+# 0 — Configuration
+
+```{r config}
+VINTAGE <- 2020
+
+CSV_PATH <- file.path(path.expand("~"), "Documents", "SHRS_Analysis",
+                       "market_analysis", "v3data", "projections_csv",
+                       "education_csv", as.character(VINTAGE),
+                       paste0("education_", VINTAGE, " - Table 5.4.csv"))
+
+soc_xwalk <- tribble(
+  ~shrs_program, ~shrs_dept, ~soc_code,
+  "SLP", "CSD", "29-1127",
+  "AuD", "CSD", "29-1181",
+  "HIM", "HIM", "29-9021",
+  "OTD", "RST", "29-1122",
+  "DPT", "RST", "29-1123",
+  "PAS", "PAS", "29-1071",
+  "AT",  "SMN", "29-9091",
+  "DN",  "SMN", "29-1031",
+  "SS",  "SMN", "29-1128"
+)
+
+target_socs <- soc_xwalk$soc_code
+signal_colors <- c("Green" = "#27ae60", "Yellow" = "#f39c12", "Red" = "#e74c3c")
+```
+
+# 1 — Load & Clean
+
+The 2020 vintage has a merged header ("title and code" in column 1) but data
+rows follow the standard layout. Also note: **AT was classified as Bachelor's
+degree entry** in this vintage — it was reclassified to Master's starting 2021.
+
+```{r load}
+raw <- read_csv(CSV_PATH, show_col_types = FALSE)
+
+names(raw)[1] <- "occ_title"
+names(raw)[2] <- "soc_code"
+names(raw)[3] <- "entry_education"
+names(raw)[4] <- "work_experience"
+names(raw)[5] <- "ojt_required"
+
+if (ncol(raw) >= 6) raw <- raw |> select(1:5)
+
+raw <- raw |>
+  mutate(
+    soc_code  = str_trim(soc_code),
+    occ_title = str_remove_all(occ_title, "\\(\\d+\\)|\\[\\d+\\]") |> str_trim()
+  )
+
+shrs_t54 <- raw |>
+  filter(soc_code %in% target_socs) |>
+  left_join(soc_xwalk, by = "soc_code")
+```
+
+```{r dq, results='asis'}
+cat(paste0("**Vintage:** ", VINTAGE, " | **Programs found:** ", nrow(shrs_t54), " of 9\n\n"))
+missing <- setdiff(target_socs, shrs_t54$soc_code)
+if (length(missing) > 0) {
+  miss_names <- soc_xwalk |> filter(soc_code %in% missing) |> pull(shrs_program)
+  cat(paste0("> <span style='color:#e74c3c;'>**Missing:**</span> ",
+             paste(miss_names, collapse = ", "),
+             " — not separately reported until a later vintage.\n\n"))
+}
+
+# Flag AT reclassification
+at_row <- shrs_t54 |> filter(soc_code == "29-9091")
+if (nrow(at_row) > 0 && at_row$entry_education == "Bachelor's degree") {
+  cat(paste0("> <span style='color:#f39c12;'>**Reclassification note:**</span> ",
+             "Athletic Trainers (AT) is listed as **Bachelor's degree** entry in ",
+             "this vintage. BLS reclassified AT to **Master's degree** starting ",
+             "in the 2021 vintage, reflecting the CAATE degree-level mandate.\n\n"))
+}
+```
+
+---
+
+# 2 — Entry Requirements
+
+```{r entry-table}
+shrs_t54 |>
+  select(Program = shrs_program, Dept = shrs_dept,
+         `Entry Education` = entry_education,
+         `Work Experience` = work_experience,
+         `OJT Required` = ojt_required) |>
+  arrange(factor(Program, levels = soc_xwalk$shrs_program)) |>
+  kable(caption = paste0("BLS Entry Requirements (", VINTAGE, ")")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 3 — Training Burden & Scorecard
+
+```{r burden-scorecard}
+shrs_t54 <- shrs_t54 |>
+  mutate(
+    edu_tier = case_when(
+      entry_education == "Doctoral or professional degree" ~ 4,
+      entry_education == "Master's degree" ~ 3,
+      entry_education == "Bachelor's degree" ~ 2,
+      entry_education == "Associate's degree" ~ 1, TRUE ~ 0
+    ),
+    tier_label = case_when(
+      edu_tier == 4 ~ "Doctoral", edu_tier == 3 ~ "Master's",
+      edu_tier == 2 ~ "Bachelor's", edu_tier == 1 ~ "Associate's",
+      TRUE ~ "Below Associate's"
+    ),
+    edu_years = case_when(
+      entry_education == "Doctoral or professional degree" ~ 21,
+      entry_education == "Master's degree" ~ 18,
+      entry_education == "Bachelor's degree" ~ 16,
+      entry_education == "Associate's degree" ~ 14, TRUE ~ 12
+    ),
+    edu_burden = case_when(
+      entry_education == "Doctoral or professional degree" ~ 3,
+      entry_education == "Master's degree" ~ 2,
+      entry_education == "Bachelor's degree" ~ 1,
+      entry_education == "Associate's degree" ~ 0, TRUE ~ 0
+    ),
+    exp_burden = case_when(
+      work_experience == "5 years or more" ~ 3,
+      work_experience == "Less than 5 years" ~ 2,
+      work_experience == "None" ~ 0, TRUE ~ 0
+    ),
+    ojt_burden = case_when(
+      str_detect(ojt_required, regex("long-term", ignore_case = TRUE)) ~ 3,
+      str_detect(ojt_required, regex("moderate", ignore_case = TRUE)) ~ 2,
+      str_detect(ojt_required, regex("internship|residency", ignore_case = TRUE)) ~ 2,
+      str_detect(ojt_required, regex("short-term", ignore_case = TRUE)) ~ 1,
+      ojt_required == "None" ~ 0, TRUE ~ 0
+    ),
+    total_burden = edu_burden + exp_burden + ojt_burden,
+    d1_training_simple = round((1 - total_burden / 9) * 100, 1),
+    d2_exp_accessible  = round((1 - exp_burden / 3) * 100, 1),
+    composite = round((d1_training_simple + d2_exp_accessible) / 2, 1),
+    signal = case_when(composite >= 70 ~ "Green", composite >= 50 ~ "Yellow", TRUE ~ "Red")
+  )
+
+shrs_t54 |>
+  select(Program = shrs_program, `Entry Ed` = entry_education,
+         `Edu` = edu_burden, `Exp` = exp_burden, `OJT` = ojt_burden,
+         `Total (0-9)` = total_burden,
+         `Train Simple` = d1_training_simple, `Exp Access` = d2_exp_accessible,
+         Composite = composite, Signal = signal) |>
+  arrange(factor(Program, levels = soc_xwalk$shrs_program)) |>
+  kable(digits = 1, caption = paste0("Training Burden & Scorecard (", VINTAGE, ")")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r tier-chart, fig.height=5}
+shrs_t54 |>
+  ggplot(aes(x = factor(shrs_program,
+                         levels = intersect(soc_xwalk$shrs_program,
+                                            shrs_t54$shrs_program)),
+             y = edu_years, fill = tier_label)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = tier_label), vjust = -0.3, size = 3.5) +
+  scale_fill_manual(values = c("Doctoral" = "#2c3e50", "Master's" = "#2c7bb6",
+                                "Bachelor's" = "#27ae60", "Associate's" = "#f39c12"),
+                    name = "Tier") +
+  scale_y_continuous(limits = c(0, 24)) +
+  labs(title = paste0("Entry Education by Program (", VINTAGE, ")"),
+       subtitle = "Note: AT classified as Bachelor's in this vintage (reclassified to Master's in 2021)",
+       x = NULL, y = "Years of Education") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1), legend.position = "bottom")
+```
+
+```{r burden-chart, fig.height=5}
+shrs_t54 |>
+  select(shrs_program, edu_burden, exp_burden, ojt_burden) |>
+  pivot_longer(-shrs_program, names_to = "component", values_to = "score") |>
+  mutate(component = case_when(
+    component == "edu_burden" ~ "Education", component == "exp_burden" ~ "Experience",
+    component == "ojt_burden" ~ "OJT")) |>
+  ggplot(aes(x = factor(shrs_program,
+                         levels = intersect(soc_xwalk$shrs_program,
+                                            shrs_t54$shrs_program)),
+             y = score, fill = component)) +
+  geom_col(width = 0.6) +
+  scale_fill_manual(values = c("Education" = "#2c7bb6", "Experience" = "#fdae61", "OJT" = "#d7191c")) +
+  labs(title = paste0("Training Burden (", VINTAGE, ")"), x = NULL, y = "Score") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1), legend.position = "bottom")
+```
+
+```{r sc-rank, fig.height=5}
+shrs_t54 |>
+  ggplot(aes(x = reorder(shrs_program, composite), y = composite, fill = signal)) +
+  geom_col(width = 0.6) + geom_text(aes(label = composite), hjust = -0.1, size = 4) +
+  coord_flip() + scale_fill_manual(values = signal_colors) +
+  scale_y_continuous(limits = c(0, 110)) +
+  labs(title = paste0("Entry Composite (", VINTAGE, ")"), x = NULL, y = "Score") +
+  theme_minimal(base_size = 13) + theme(legend.position = "bottom")
+```
+
+---
+
+# 4 — Reclassification Tracker
+
+Compare 2020 entry requirements against later vintages to document BLS changes.
+
+```{r reclass, results='asis'}
+# Check for 2021 T5.4 to compare
+T54_2021_PATH <- file.path(path.expand("~"), "Documents", "SHRS_Analysis",
+                            "market_analysis", "v3data", "projections_csv",
+                            "education_csv", "2021",
+                            "education_2021 - Table 5.4.csv")
+
+if (file.exists(T54_2021_PATH)) {
+  raw_2021 <- read_csv(T54_2021_PATH, show_col_types = FALSE)
+  names(raw_2021)[1] <- "occ_title"
+  names(raw_2021)[2] <- "soc_code"
+  names(raw_2021)[3] <- "entry_education"
+  
+  cmp <- shrs_t54 |>
+    select(shrs_program, soc_code, entry_2020 = entry_education) |>
+    left_join(
+      raw_2021 |>
+        mutate(soc_code = str_trim(soc_code)) |>
+        filter(soc_code %in% target_socs) |>
+        select(soc_code, entry_2021 = entry_education),
+      by = "soc_code"
+    ) |>
+    mutate(changed = entry_2020 != entry_2021)
+  
+  changes <- cmp |> filter(changed)
+  if (nrow(changes) > 0) {
+    cat("**BLS Reclassifications (2020 to 2021):**\n\n")
+    for (j in seq_len(nrow(changes))) {
+      r <- changes[j, ]
+      cat(paste0("- <span style='color:#f39c12;'>**", r$shrs_program,
+                 "**</span>: ", r$entry_2020, " → ", r$entry_2021, "\n"))
+    }
+  } else {
+    cat("No entry-level reclassifications between 2020 and 2021.\n")
+  }
+  
+  t54_reclass_2020_2021 <- cmp
+} else {
+  cat("*2021 Table 5.4 not found — skipping reclassification check.*\n")
+}
+```
+
+---
+
+# 5 — Stored Outputs
+
+```{r store}
+t54_2020_data      <- shrs_t54
+t54_2020_scorecard <- shrs_t54 |>
+  select(shrs_program, shrs_dept, soc_code, entry_education,
+         work_experience, ojt_required, edu_tier, tier_label, edu_years,
+         edu_burden, exp_burden, ojt_burden, total_burden,
+         d1_training_simple, d2_exp_accessible, composite, signal)
+```
+
+```{r catalog, results='asis'}
+cat("| Variable | Description | Dims |\n|---|---|---|\n")
+cat(paste0("| `t54_2020_data` | Full T5.4 data | ", nrow(t54_2020_data), " x ", ncol(t54_2020_data), " |\n"))
+cat(paste0("| `t54_2020_scorecard` | Entry scorecard | ", nrow(t54_2020_scorecard), " x ", ncol(t54_2020_scorecard), " |\n"))
+if (exists("t54_reclass_2020_2021")) {
+  cat(paste0("| `t54_reclass_2020_2021` | 2020 vs 2021 reclassification tracker | ",
+             nrow(t54_reclass_2020_2021), " x ", ncol(t54_reclass_2020_2021), " |\n"))
+}
+```
+
+**Source:** BLS Table 5.4, 2020 vintage.
+
+**Key finding:** AT reclassified from Bachelor's (2020) to Master's (2021), reflecting CAATE mandate.
+HIM (29-9021) not present in 2020 T5.4 — added in 2021.

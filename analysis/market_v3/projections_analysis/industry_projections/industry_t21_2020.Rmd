@@ -1,0 +1,207 @@
+---
+title: "SHRS Market Analysis — Industry Employment by Sector (2020 Vintage)"
+subtitle: "BLS Employment Projections Table 2.1 · 2020–2030 Cycle"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6)
+```
+
+# 0 — Setup
+
+```{r packages}
+library(tidyverse); library(scales); library(knitr); library(kableExtra)
+```
+
+```{r config}
+soc_crosswalk <- tribble(
+  ~shrs_program, ~shrs_dept, ~soc_code, ~occupation_title,
+  "SLP","CSD","29-1127","Speech-Language Pathologists","AuD","CSD","29-1181","Audiologists",
+  "HIM","HIM","29-9021","Health Information Technologists and Medical Registrars",
+  "OTD","RST","29-1122","Occupational Therapists","DPT","RST","29-1123","Physical Therapists",
+  "PAS","PAS","29-1071","Physician Assistants","AT","SMN","29-9091","Athletic Trainers",
+  "DN","SMN","29-1031","Dietitians and Nutritionists","SS","SMN","29-1128","Exercise Physiologists")
+
+DATA_PATH <- "/Users/gpps/Documents/SHRS_Analysis/market_analysis/v3data/projections_csv/industry_csv/2020/industry_2020 - Table 2.1.csv"
+VINTAGE <- 2020; CYCLE <- "2020-2030"
+```
+
+```{r helpers}
+clean_num <- function(x) {
+  x <- str_remove_all(x, ","); x <- str_replace_all(x, "\u2014|\u2013|--|-", NA_character_)
+  x <- str_trim(x); as.numeric(x)
+}
+```
+
+---
+
+# 1 — Load & Clean
+
+Same 11-column layout as 2021/2022 (no NAICS col, no pct-change cols, blank rows).
+Time window: 2010 (hist), 2020 (base), 2030 (proj).
+
+**COVID note:** The 2020 vintage uses the pandemic-affected 2020 base year.
+Employment figures reflect the COVID-19 disruption, making historical growth
+rates (2010–2020) lower than expected and projected growth rates (2020–2030)
+artificially higher due to recovery expectations.
+
+```{r load-data}
+raw <- read_csv(DATA_PATH, col_types = cols(.default = "c"), col_names = FALSE)
+colnames(raw) <- c("industry_sector", "emp_hist", "emp_base", "emp_proj",
+                    "emp_change_hist", "emp_change_proj",
+                    "pct_dist_hist", "pct_dist_base", "pct_dist_proj",
+                    "cagr_hist", "cagr_proj")
+raw <- raw[-1, ] %>%
+  mutate(industry_sector = str_remove_all(industry_sector, "\\(\\d+\\)|\\[\\d+\\]") %>% str_trim()) %>%
+  filter(!is.na(industry_sector) & industry_sector != "")
+
+df <- raw %>%
+  mutate(across(-industry_sector, clean_num),
+         emp_pct_hist = round((emp_change_hist / emp_hist) * 100, 1),
+         emp_pct_proj = round((emp_change_proj / emp_base) * 100, 1))
+
+cat("Loaded", nrow(df), "rows for", CYCLE, "cycle\n")
+```
+
+---
+
+# 2 — Benchmarks & Sectors
+
+```{r benchmarks}
+total_row <- df %>% filter(str_detect(industry_sector, regex("^Total", ignore_case = TRUE))) %>% slice(1)
+total_emp_base <- total_row$emp_base; total_emp_proj <- total_row$emp_proj
+total_pct_proj <- total_row$emp_pct_proj; total_cagr_proj <- total_row$cagr_proj
+cat("Total Economy: ", total_pct_proj, "% | CAGR ", total_cagr_proj, "%\n")
+```
+
+```{r sectors}
+sectors <- df %>%
+  filter(!is.na(emp_base),
+         !str_detect(industry_sector,
+           regex("^Total|^Nonagriculture wage|^Goods-producing|^Service-providing|self-employed",
+                 ignore_case = TRUE))) %>%
+  mutate(sector_clean = str_trim(industry_sector),
+         is_healthcare = str_detect(sector_clean,
+           regex("health care|healthcare|social assistance", ignore_case = TRUE)))
+```
+
+```{r sector-growth, fig.height=8}
+sectors %>% filter(!is.na(emp_pct_proj)) %>%
+  ggplot(aes(x = reorder(sector_clean, emp_pct_proj), y = emp_pct_proj, fill = is_healthcare)) +
+  geom_col(width = 0.7) +
+  geom_hline(yintercept = total_pct_proj, linetype = "dashed", color = "gray40") +
+  annotate("text", x = 2, y = total_pct_proj + 0.3,
+           label = paste0("All: ", total_pct_proj, "%"), hjust = 0, size = 3.5, color = "gray40") +
+  coord_flip() +
+  scale_fill_manual(values = c("FALSE" = "#b0c4de", "TRUE" = "#d7191c"),
+                    labels = c("Other", "HC & SA"), name = NULL) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.2))) +
+  labs(title = paste0("Projected Growth by Sector (", CYCLE, ")"),
+       subtitle = "NOTE: 2020 base year reflects COVID-19 disruption",
+       x = NULL, y = "Projected Growth (%)") +
+  theme_minimal(base_size = 12) + theme(legend.position = "bottom")
+```
+
+---
+
+# 3 — Healthcare Deep-Dive & Scorecard
+
+```{r healthcare}
+hc_row <- sectors %>% filter(is_healthcare) %>% slice(1)
+hc_emp_base <- hc_row$emp_base; hc_emp_proj <- hc_row$emp_proj
+hc_pct_proj <- hc_row$emp_pct_proj; hc_cagr_proj <- hc_row$cagr_proj
+hc_pct_dist_base <- hc_row$pct_dist_base; hc_pct_dist_proj <- hc_row$pct_dist_proj
+growth_ratio <- hc_pct_proj / total_pct_proj
+share_change <- hc_pct_dist_proj - hc_pct_dist_base
+
+cat("HC: ", hc_pct_proj, "% | CAGR ", hc_cagr_proj, "% | Ratio ", round(growth_ratio, 2), "x\n")
+```
+
+```{r scorecard}
+growth_score <- case_when(growth_ratio >= 3.0 ~ 100, growth_ratio >= 2.5 ~ 90,
+  growth_ratio >= 2.0 ~ 80, growth_ratio >= 1.5 ~ 70, growth_ratio >= 1.0 ~ 60,
+  growth_ratio >= 0.5 ~ 40, TRUE ~ 20)
+size_score <- case_when(hc_pct_dist_base >= 15 ~ 100, hc_pct_dist_base >= 12 ~ 85,
+  hc_pct_dist_base >= 10 ~ 70, hc_pct_dist_base >= 8 ~ 55,
+  hc_pct_dist_base >= 5 ~ 40, TRUE ~ 20)
+trajectory_score <- case_when(share_change >= 1.0 ~ 100, share_change >= 0.5 ~ 80,
+  share_change >= 0.0 ~ 60, share_change >= -0.5 ~ 40, TRUE ~ 20)
+cagr_ratio <- hc_cagr_proj / total_cagr_proj
+cagr_score <- case_when(cagr_ratio >= 3.0 ~ 100, cagr_ratio >= 2.5 ~ 90,
+  cagr_ratio >= 2.0 ~ 80, cagr_ratio >= 1.5 ~ 70, cagr_ratio >= 1.0 ~ 60,
+  cagr_ratio >= 0.5 ~ 40, TRUE ~ 20)
+composite_score <- round(mean(c(growth_score, size_score, trajectory_score, cagr_score)), 0)
+signal <- case_when(composite_score >= 70 ~ "Green", composite_score >= 50 ~ "Yellow", TRUE ~ "Red")
+
+scorecard_df <- tibble(
+  Dimension = c("Growth Premium", "Market Size", "Share Trajectory", "CAGR Premium", "COMPOSITE"),
+  Score = c(growth_score, size_score, trajectory_score, cagr_score, composite_score),
+  Signal = c(if_else(growth_score>=70,"Green",if_else(growth_score>=50,"Yellow","Red")),
+             if_else(size_score>=70,"Green",if_else(size_score>=50,"Yellow","Red")),
+             if_else(trajectory_score>=70,"Green",if_else(trajectory_score>=50,"Yellow","Red")),
+             if_else(cagr_score>=70,"Green",if_else(cagr_score>=50,"Yellow","Red")), signal),
+  Detail = c(paste0(hc_pct_proj,"% vs ",total_pct_proj,"% (",round(growth_ratio,2),"x)"),
+             paste0("HC = ",hc_pct_dist_base,"% of total"),
+             paste0(hc_pct_dist_base,"% -> ",hc_pct_dist_proj,"% (+",round(share_change,1)," pp)"),
+             paste0("CAGR ",hc_cagr_proj,"% vs ",total_cagr_proj,"% (",round(cagr_ratio,2),"x)"),
+             "Average of 4 dimensions"))
+
+scorecard_df %>%
+  kable(caption = paste0("Industry Context Scorecard (", CYCLE, ")")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+  row_spec(which(scorecard_df$Signal == "Green"), background = "#d4edda", color = "#155724") %>%
+  row_spec(which(scorecard_df$Signal == "Yellow"), background = "#fff3cd", color = "#856404") %>%
+  row_spec(which(scorecard_df$Signal == "Red"), background = "#f8d7da", color = "#721c24") %>%
+  row_spec(5, bold = TRUE)
+```
+
+```{r scorecard-viz}
+scorecard_df %>% filter(Dimension != "COMPOSITE") %>%
+  ggplot(aes(x = reorder(Dimension, Score), y = Score, fill = Signal)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = Score), hjust = -0.2, size = 4.5, fontface = "bold") +
+  geom_hline(yintercept = 70, linetype = "dashed", color = "#155724", linewidth = 0.5) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "#856404", linewidth = 0.5) +
+  coord_flip() +
+  scale_fill_manual(values = c("Green"="#28a745","Yellow"="#ffc107","Red"="#dc3545")) +
+  scale_y_continuous(limits = c(0, 110)) +
+  labs(title = paste0("Industry Scorecard (", CYCLE, ")"), x = NULL, y = "Score (0-100)") +
+  theme_minimal(base_size = 13) + theme(legend.position = "none")
+```
+
+---
+
+# 4 — Stored Outputs
+
+```{r stored-outputs}
+ind_t21_2020_vintage <- VINTAGE; ind_t21_2020_cycle <- CYCLE
+ind_t21_2020_total_emp <- total_emp_base; ind_t21_2020_total_proj <- total_emp_proj
+ind_t21_2020_total_pct <- total_pct_proj; ind_t21_2020_total_cagr <- total_cagr_proj
+ind_t21_2020_hc_emp <- hc_emp_base; ind_t21_2020_hc_proj <- hc_emp_proj
+ind_t21_2020_hc_pct <- hc_pct_proj; ind_t21_2020_hc_cagr <- hc_cagr_proj
+ind_t21_2020_hc_share_base <- hc_pct_dist_base; ind_t21_2020_hc_share_proj <- hc_pct_dist_proj
+ind_t21_2020_growth_ratio <- growth_ratio; ind_t21_2020_scorecard <- scorecard_df
+ind_t21_2020_composite <- composite_score; ind_t21_2020_signal <- signal
+ind_t21_2020_sectors <- sectors; ind_t21_2020_covid_note <- "2020 base reflects COVID disruption"
+```
+
+```{r output-registry}
+tribble(~variable, ~description,
+  "ind_t21_2020_vintage","Vintage (2020)","ind_t21_2020_cycle","Cycle (2020-2030)",
+  "ind_t21_2020_total_pct","Total growth % (computed)","ind_t21_2020_total_cagr","Total CAGR %",
+  "ind_t21_2020_hc_pct","HC growth %","ind_t21_2020_hc_cagr","HC CAGR %",
+  "ind_t21_2020_hc_share_base","HC share base %","ind_t21_2020_hc_share_proj","HC share proj %",
+  "ind_t21_2020_growth_ratio","HC/Total ratio","ind_t21_2020_scorecard","Scorecard df",
+  "ind_t21_2020_composite","Composite (0-100)","ind_t21_2020_signal","Signal",
+  "ind_t21_2020_covid_note","COVID base year note"
+) %>% kable(caption = "Output Registry — industry_t21_2020.Rmd") %>%
+  kable_styling(bootstrap_options = c("striped","hover"), full_width = FALSE)
+```

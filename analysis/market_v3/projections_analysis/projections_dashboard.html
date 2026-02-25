@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SHRS Projections Analysis — Master Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: linear-gradient(135deg, #161b22 0%, #1a2332 100%);
+      border-bottom: 1px solid #30363d;
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header h1 {
+      font-size: 22px;
+      font-weight: 600;
+      color: #e6edf3;
+    }
+    .header h1 span { color: #58a6ff; }
+    .header .subtitle {
+      font-size: 13px;
+      color: #8b949e;
+      margin-top: 4px;
+    }
+    .header .badge {
+      background: #238636;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 20px;
+    }
+
+    /* ── Category Tabs (top level) ── */
+    .cat-tabs {
+      display: flex;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 0 24px;
+      gap: 0;
+      overflow-x: auto;
+    }
+    .cat-tab {
+      padding: 14px 24px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #8b949e;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .cat-tab:hover { color: #e6edf3; }
+    .cat-tab.active {
+      color: #58a6ff;
+      border-bottom-color: #58a6ff;
+    }
+    .cat-tab .count {
+      background: #30363d;
+      color: #8b949e;
+      font-size: 11px;
+      padding: 1px 7px;
+      border-radius: 10px;
+      margin-left: 6px;
+    }
+    .cat-tab.active .count {
+      background: #1f3a5f;
+      color: #58a6ff;
+    }
+
+    /* ── Vintage sub-tabs ── */
+    .content-area {
+      display: none;
+    }
+    .content-area.active { display: block; }
+
+    .vintage-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      padding: 12px 24px;
+      gap: 8px;
+      background: #0d1117;
+      border-bottom: 1px solid #21262d;
+    }
+    .vintage-tab {
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #8b949e;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .vintage-tab:hover {
+      background: #1c2333;
+      color: #e6edf3;
+      border-color: #484f58;
+    }
+    .vintage-tab.active {
+      background: #1f3a5f;
+      color: #58a6ff;
+      border-color: #58a6ff;
+    }
+
+    /* ── iframe display ── */
+    .iframe-container {
+      width: 100%;
+      height: calc(100vh - 160px);
+      background: #fff;
+    }
+    .iframe-container iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    /* ── Empty state ── */
+    .empty-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: calc(100vh - 160px);
+      color: #484f58;
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h1><span>SHRS</span> Projections Analysis — Master View</h1>
+      <div class="subtitle">BLS Employment Projections · All Vintages · 4 Table Categories</div>
+    </div>
+    <div class="badge">52 HTML Reports</div>
+  </div>
+
+  <!-- Category Tabs -->
+  <div class="cat-tabs" id="catTabs">
+    <div class="cat-tab active" data-cat="occupation">
+      Occupation Projections <span class="count">16</span>
+    </div>
+    <div class="cat-tab" data-cat="industry">
+      Industry Projections <span class="count">12</span>
+    </div>
+    <div class="cat-tab" data-cat="education">
+      Education Projections <span class="count">16</span>
+    </div>
+    <div class="cat-tab" data-cat="labor">
+      Labor Force Projections <span class="count">16</span>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- OCCUPATION PROJECTIONS -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <div class="content-area active" id="cat-occupation">
+    <div class="vintage-tabs" id="vtabs-occupation">
+      <div class="vintage-tab active" data-file="occupaion_projections/proj_2024_analysis.html">2024 (2024–2034)</div>
+      <div class="vintage-tab" data-file="occupaion_projections/proj_2023_analysis.html">2023 (2023–2033)</div>
+      <div class="vintage-tab" data-file="occupaion_projections/proj_2022_analysis.html">2022 (2022–2032)</div>
+      <div class="vintage-tab" data-file="occupaion_projections/proj_2021_analysis.html">2021 (2021–2031)</div>
+      <div class="vintage-tab" data-file="occupaion_projections/proj_2020_analysis.html">2020 (2020–2030)</div>
+      <div class="vintage-tab" data-file="occupaion_projections/proj_2019_analysis.html">2019 (2019–2029)</div>
+      <div class="vintage-tab" data-file="occupaion_projections/proj_2018_analysis.html">2018 (2018–2028)</div>
+      <div class="vintage-tab" data-file="occupaion_projections/proj_2016_analysis.html">2016 (2016–2026)</div>
+    </div>
+    <div class="iframe-container" id="iframe-occupation">
+      <iframe src="occupaion_projections/proj_2024_analysis.html"></iframe>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- INDUSTRY PROJECTIONS -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <div class="content-area" id="cat-industry">
+    <div class="vintage-tabs" id="vtabs-industry">
+      <!-- Table 2.1 (Sector) -->
+      <div class="vintage-tab active" data-file="industry_projections/industry_t21_2024.html" style="border-left: 3px solid #58a6ff;">T2.1 · 2024</div>
+      <div class="vintage-tab" data-file="industry_projections/industry_t21_2023.html">T2.1 · 2023</div>
+      <div class="vintage-tab" data-file="industry_projections/industry_t21_2022.html">T2.1 · 2022</div>
+      <div class="vintage-tab" data-file="industry_projections/industry_t21_2021.html">T2.1 · 2021</div>
+      <div class="vintage-tab" data-file="industry_projections/industry_t21_2020.html">T2.1 · 2020</div>
+      <div class="vintage-tab" data-file="industry_projections/industry_t21_2019.html">T2.1 · 2019</div>
+      <!-- Table 2.11 / 2.7 (Detailed) -->
+      <div class="vintage-tab" data-file="industry_projections/industry_t211_2024.html" style="border-left: 3px solid #d29922;">T2.11 · 2024</div>
+      <div class="vintage-tab" data-file="industry_projections/industry_t211_2023.html">T2.11 · 2023</div>
+      <div class="vintage-tab" data-file="industry_projections/industry_t211_2022.html">T2.11 · 2022</div>
+      <div class="vintage-tab" data-file="industry_projections/industry_t211_2021.html">T2.11 · 2021</div>
+      <div class="vintage-tab" data-file="industry_projections/industry_t211_2020.html">T2.11 · 2020</div>
+      <div class="vintage-tab" data-file="industry_projections/industry_t27_2019.html">T2.7 · 2019</div>
+    </div>
+    <div class="iframe-container" id="iframe-industry">
+      <iframe src="industry_projections/industry_t21_2024.html"></iframe>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- EDUCATION PROJECTIONS -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <div class="content-area" id="cat-education">
+    <div class="vintage-tabs" id="vtabs-education">
+      <!-- Table 5.3 (Attainment) -->
+      <div class="vintage-tab active" data-file="education_projections/edu_2024_t53_attainment.html" style="border-left: 3px solid #58a6ff;">T5.3 · 2024</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2023_t53_attainment.html">T5.3 · 2023</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2022_t53_attainment.html">T5.3 · 2022</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2021_t53_attainment.html">T5.3 · 2021</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2020_t53_attainment.html">T5.3 · 2020</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2019_t53_attainment.html">T5.3 · 2019</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2018_attainment.html">T5.3 · 2018</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2016_attainment.html">T5.3 · 2016</div>
+      <!-- Table 5.4 (Requirements / Assignment) -->
+      <div class="vintage-tab" data-file="education_projections/edu_2024_t54_requirements.html" style="border-left: 3px solid #d29922;">T5.4 · 2024</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2023_t54_requirements.html">T5.4 · 2023</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2022_t54_requirements.html">T5.4 · 2022</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2021_t54_requirements.html">T5.4 · 2021</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2020_t54_requirements.html">T5.4 · 2020</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2019_t54_requirements.html">T5.4 · 2019</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2018_assignment.html">T5.4 · 2018</div>
+      <div class="vintage-tab" data-file="education_projections/edu_2016_assignment.html">T5.4 · 2016</div>
+    </div>
+    <div class="iframe-container" id="iframe-education">
+      <iframe src="education_projections/edu_2024_t53_attainment.html"></iframe>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- LABOR FORCE PROJECTIONS -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <div class="content-area" id="cat-labor">
+    <div class="vintage-tabs" id="vtabs-labor">
+      <!-- Table 3.1 (Size & Growth) -->
+      <div class="vintage-tab active" data-file="labor_force_projections/lf_2024_t31_size_growth.html" style="border-left: 3px solid #58a6ff;">T3.1 · 2024</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2023_t31_size_growth.html">T3.1 · 2023</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2022_t31_size_growth.html">T3.1 · 2022</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2021_t31_size_growth.html">T3.1 · 2021</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2020_t31_size_growth.html">T3.1 · 2020</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2019_t31_size_growth.html">T3.1 · 2019</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2018_t31_size_growth.html">T3.1 · 2018</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2016_t31_size_growth.html">T3.1 · 2016</div>
+      <!-- Table 3.3 (Participation Rates) -->
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2024_t33_participation.html" style="border-left: 3px solid #d29922;">T3.3 · 2024</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2023_t33_participation.html">T3.3 · 2023</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2022_t33_participation.html">T3.3 · 2022</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2021_t33_participation.html">T3.3 · 2021</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2020_t33_participation.html">T3.3 · 2020</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2019_t33_participation.html">T3.3 · 2019</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2018_t33_participation.html">T3.3 · 2018</div>
+      <div class="vintage-tab" data-file="labor_force_projections/lf_2016_t33_participation.html">T3.3 · 2016</div>
+    </div>
+    <div class="iframe-container" id="iframe-labor">
+      <iframe src="labor_force_projections/lf_2024_t31_size_growth.html"></iframe>
+    </div>
+  </div>
+
+  <script>
+    // ── Category tab switching ──
+    document.querySelectorAll('.cat-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        // Deactivate all
+        document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.content-area').forEach(c => c.classList.remove('active'));
+
+        // Activate selected
+        tab.classList.add('active');
+        const cat = tab.dataset.cat;
+        document.getElementById('cat-' + cat).classList.add('active');
+      });
+    });
+
+    // ── Vintage tab switching (within each category) ──
+    document.querySelectorAll('.vintage-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const parent = tab.closest('.content-area');
+        const tabGroup = parent.querySelector('.vintage-tabs');
+        const iframeContainer = parent.querySelector('.iframe-container');
+
+        // Deactivate siblings
+        tabGroup.querySelectorAll('.vintage-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+
+        // Update iframe
+        const file = tab.dataset.file;
+        iframeContainer.querySelector('iframe').src = file;
+      });
+    });
+  </script>
+
+</body>
+</html>

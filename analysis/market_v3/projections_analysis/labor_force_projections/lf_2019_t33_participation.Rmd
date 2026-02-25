@@ -1,0 +1,161 @@
+---
+title: "SHRS Market Analysis — 2019 Participation Rates (Table 3.3)"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, message=FALSE, warning=FALSE, fig.width=10, fig.height=6)
+```
+
+```{r packages}
+library(tidyverse); library(scales); library(knitr); library(kableExtra)
+```
+
+# 0 — Configuration
+
+```{r config}
+VINTAGE <- "2019"
+YR1 <- 1999; YR2 <- 2009; YR3 <- 2019; YR4 <- 2029
+
+CSV_PATH <- file.path(path.expand("~"), "Documents", "SHRS_Analysis",
+                       "market_analysis", "v3data", "projections_csv",
+                       "labor_force_csv", "2019",
+                       "2019_labor-force - Table 3.3.csv")
+```
+
+# 1 — Load & Clean
+
+```{r load}
+raw <- read_csv(CSV_PATH, skip = 2, col_names = FALSE, show_col_types = FALSE)
+
+names(raw) <- c("group",
+                "rate_yr1","rate_yr2","rate_yr3","rate_yr4",
+                "rate_chg_12","rate_chg_23","rate_chg_34",
+                "cagr_12","cagr_23","cagr_34")
+
+clean_num <- function(x) {
+  x <- str_remove_all(as.character(x), ",")
+  x <- str_trim(x)
+  x[x %in% c("\u2014","\u2013","—","-","NA","",".")] <- NA
+  suppressWarnings(as.numeric(x))
+}
+
+raw <- raw |>
+  mutate(group = str_trim(as.character(group))) |>
+  filter(!is.na(group), group != "", !str_detect(group, "^Footnote|^Note:|^Source:|^\\[|^\\(")) |>
+  mutate(across(-group, clean_num)) |>
+  filter(!is.na(rate_yr3))
+```
+
+```{r dq, results='asis'}
+cat(paste0("**Vintage:** ",VINTAGE," | **Rows:** ",nrow(raw),"\n"))
+```
+
+---
+
+# 2 — Overall LFPR Trend
+
+```{r total}
+total <- raw |> filter(str_detect(group, "^Total"))
+
+lfpr_current <- total$rate_yr3
+lfpr_projected <- total$rate_yr4
+lfpr_change <- total$rate_chg_34
+
+tibble(Year=c(YR1,YR2,YR3,YR4),
+       Rate=c(total$rate_yr1,total$rate_yr2,total$rate_yr3,total$rate_yr4),
+       Type=c("Historical","Historical","Current","Projected")) |>
+  ggplot(aes(x=Year, y=Rate)) +
+  geom_line(linewidth=1.2, color="gray60") +
+  geom_point(aes(fill=Type), shape=21, size=5, color="white", stroke=1.5) +
+  geom_text(aes(label=paste0(Rate,"%")), vjust=-1.2, size=4) +
+  scale_fill_manual(values=c("Historical"="#2c7bb6","Current"="#27ae60","Projected"="#f39c12")) +
+  scale_y_continuous(limits=c(57,70)) +
+  labs(title=paste0("LFPR Trend (",VINTAGE,")"), x=NULL, y="Rate (%)", fill=NULL) +
+  theme_minimal(base_size=13) + theme(legend.position="bottom")
+
+tibble(Metric=c(paste0("LFPR ",YR1),paste0("LFPR ",YR2),paste0("LFPR ",YR3),
+                paste0("LFPR ",YR4," (proj)"),paste0("Change ",YR3,"-",YR4," (pp)")),
+       Value=c(total$rate_yr1,total$rate_yr2,total$rate_yr3,total$rate_yr4,total$rate_chg_34)) |>
+  kable(digits=1, caption="LFPR Summary") |>
+  kable_styling(bootstrap_options=c("striped","hover"), full_width=FALSE)
+```
+
+---
+
+# 3 — By Gender
+
+```{r gender}
+gender <- raw |> filter(str_detect(group, "^Men|^Women|^\\s+Men|^\\s+Women"))
+if (nrow(gender) > 0) {
+  gender |> mutate(group=str_trim(group)) |>
+    select(Group=group, !!paste0("Rate ",YR3):=rate_yr3,
+           !!paste0("Rate ",YR4):=rate_yr4, `Change (pp)`=rate_chg_34) |> head(4) |>
+    kable(digits=1, caption="LFPR by Gender") |>
+    kable_styling(bootstrap_options=c("striped","hover"), full_width=FALSE)
+}
+```
+
+---
+
+# 4 — By Age
+
+```{r age, fig.height=7}
+age <- raw |>
+  filter(str_detect(group, "^\\s*\\d+\\s+to\\s+\\d+|^\\s*55 and|^\\s*65 and|^\\s*75 and")) |>
+  mutate(group=str_trim(group))
+if (nrow(age) > 0) {
+  age |>
+    ggplot(aes(x=reorder(group,rate_yr3), y=rate_yr3)) +
+    geom_segment(aes(xend=group,y=rate_yr4,yend=rate_yr3), color="gray70", linewidth=1) +
+    geom_point(aes(color="Current"), size=4) +
+    geom_point(aes(y=rate_yr4, color="Projected"), size=4) +
+    coord_flip() +
+    scale_color_manual(values=c("Current"="#2c7bb6","Projected"="#f39c12")) +
+    labs(title=paste0("LFPR by Age: ",YR3," vs ",YR4), x=NULL, y="Rate (%)", color=NULL) +
+    theme_minimal(base_size=12) + theme(legend.position="bottom")
+}
+```
+
+---
+
+# 5 — By Race/Ethnicity
+
+```{r race}
+race <- raw |>
+  filter(str_detect(group, "^White|^Black|^All other groups|^Hispanic origin|^Other than Hispanic")) |>
+  mutate(group=str_trim(group))
+if (nrow(race) > 0) {
+  race |>
+    select(Group=group, !!paste0("Rate ",YR3):=rate_yr3,
+           !!paste0("Rate ",YR4):=rate_yr4, `Change (pp)`=rate_chg_34) |>
+    kable(digits=1, caption="LFPR by Race/Ethnicity") |>
+    kable_styling(bootstrap_options=c("striped","hover"), full_width=FALSE)
+}
+```
+
+---
+
+# 6 — Stored Outputs
+
+```{r store}
+lf_t33_2019_raw <- raw
+lf_t33_2019_total <- total
+lf_t33_2019_benchmarks <- list(lfpr_current=lfpr_current, lfpr_projected=lfpr_projected,
+                                     lfpr_change_pp=lfpr_change, yr3=YR3, yr4=YR4)
+```
+
+```{r catalog, results='asis'}
+cat("| Variable | Description |\n|---|---|\n")
+cat(paste0("| `lf_t33_2019_raw` | Full data (",nrow(raw)," rows) |\n"))
+cat("| `lf_t33_2019_benchmarks` | Key benchmarks (list) |\n")
+```
+
+**Source:** BLS Table 3.3, 2019 vintage (2019-2029).

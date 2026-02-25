@@ -1,0 +1,651 @@
+---
+title: "SHRS Market Analysis — Data Preparation (v2.1)"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+---
+
+```{r prep-setup, include=FALSE}
+
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+# 1 — Setup
+
+## 1.1 Packages
+
+```{r packages}
+library(tidyverse)
+library(readxl)
+library(janitor)
+```
+
+## 1.2 Data Paths
+
+Edit the paths below to match your local machine. These should point to the
+folders inside your secure `SHRS_Analysis` directory — **not** inside the Git
+repository.
+
+```{r paths}
+# —— EDIT THIS ONE LINE to match your machine ——
+DATA_ROOT <- file.path(path.expand("~"), "Documents", "SHRS_Analysis",
+                        "market_analysis")
+
+# BLS subdirectories
+BLS_ROOT         <- file.path(DATA_ROOT, "bls")
+OEWS_PATH        <- file.path(BLS_ROOT, "oews")
+PROJ_PATH        <- file.path(BLS_ROOT, "projections")
+LABOR_FORCE_PATH <- file.path(BLS_ROOT, "labor_force", "labor-force.xlsx")
+INDUSTRY_PATH    <- file.path(BLS_ROOT, "industry", "industry.xlsx")
+AGG_ECON_PATH    <- file.path(BLS_ROOT, "aggregate_economy",
+                               "aggregate-economy-tables.xlsx")
+
+# Education data
+EDUCATION_PATH   <- file.path(BLS_ROOT, "education", "education.xlsx")
+
+# Industry employment matrix
+# This CSV is for NAICS 621990 (All Other Misc Ambulatory Health Care)
+IND_MATRIX_PATH  <- file.path(BLS_ROOT, "industry",
+                               "National_Employment_Matrix_IND_621990.csv")
+```
+
+## 1.3 SOC Code Crosswalk — 9 Programs
+
+Covers all SHRS graduate programs across 6 departments. Each program maps to
+one unique BLS Standard Occupational Classification (SOC) code.
+
+**v2.1 Change:** Restored SS (Exercise Physiologists). Removed OT-CScD
+duplicate (shared SOC 29-1122 with OTD). All 9 SOC codes are now unique.
+
+```{r soc-crosswalk}
+soc_crosswalk <- tribble(
+  ~shrs_program, ~shrs_dept, ~soc_code,  ~occupation_title,                  ~pitt_degree,
+  # Communication Science & Disorders
+  "SLP",         "CSD",      "29-1127",  "Speech-Language Pathologists",      "Master's",
+  "AuD",         "CSD",      "29-1181",  "Audiologists",                      "Doctoral",
+
+  # Health Information Management
+  "HIM",         "HIM",      "29-9021",  "Health Information Technologists",  "Master's",
+
+  # Occupational Therapy
+  "OTD",         "OT",       "29-1122",  "Occupational Therapists",           "Doctoral",
+
+  # Physical Therapy
+  "DPT",         "PT",       "29-1123",  "Physical Therapists",               "Doctoral",
+
+  # Physician Assistant Studies
+  "PAS",         "PAS",      "29-1071",  "Physician Assistants",              "Master's",
+
+  # Sports Medicine & Nutrition
+  "AT",          "SMN",      "29-9091",  "Athletic Trainers",                 "Master's",
+  "DN",          "SMN",      "29-1031",  "Dietitians and Nutritionists",      "Master's",
+  "SS",          "SMN",      "29-1128",  "Exercise Physiologists",            "Master's"
+)
+
+target_socs <- soc_crosswalk$soc_code
+
+soc_crosswalk
+```
+
+```{r crosswalk-note}
+cat("Programs tracked:", nrow(soc_crosswalk), "\n")
+cat("Unique SOC codes:", length(unique(target_socs)), "\n")
+cat("SOC codes:", paste(target_socs, collapse = ", "), "\n")
+```
+
+---
+
+# 2 — OEWS Historical Data (2014–2024)
+
+The Occupational Employment and Wage Statistics files live inside year-specific
+subfolders (e.g. `oesm24nat/national_M2024_dl.xlsx`). The column layout changed
+over time — older files have ~20 columns while newer files have ~32. We select
+only the columns we need so everything stacks cleanly.
+
+```{r oews-load}
+# Discover all OEWS subfolders
+oews_folders <- list.dirs(OEWS_PATH, recursive = FALSE)
+
+# Helper: read one OEWS file and return a tidy tibble
+read_oews <- function(folder_path) {
+  xlsx_file <- list.files(folder_path, pattern = "national.*\\.xlsx$",
+                          full.names = TRUE, ignore.case = TRUE)
+
+  if (length(xlsx_file) == 0) {
+    message("No xlsx found in: ", folder_path)
+    return(NULL)
+  }
+
+  fname <- basename(xlsx_file[1])
+  year  <- as.integer(str_extract(fname, "\\d{4}"))
+  message("Reading: ", fname, " (year: ", year, ")")
+
+  df <- read_excel(xlsx_file[1], sheet = 1, col_types = "text") |>
+    clean_names()
+
+  message("  Columns found: ", paste(names(df), collapse = ", "))
+
+  if (!"occ_code" %in% names(df)) {
+    message("  WARNING: occ_code not found, skipping this file")
+    return(NULL)
+  }
+
+  cols_we_want <- c("occ_code", "occ_title", "tot_emp",
+                     "a_mean", "a_median",
+                     "a_pct10", "a_pct25", "a_pct75", "a_pct90",
+                     "h_mean", "h_median")
+
+  cols_available <- intersect(cols_we_want, names(df))
+
+  df <- df |>
+    select(all_of(cols_available)) |>
+    filter(occ_code %in% target_socs) |>
+    mutate(year = year)
+
+  numeric_cols <- setdiff(cols_available, c("occ_code", "occ_title"))
+  df <- df |>
+    mutate(across(all_of(numeric_cols), ~ {
+      x <- str_remove_all(.x, ",")
+      x <- na_if(x, "**")
+      x <- na_if(x, "#")
+      x <- na_if(x, "*")
+      as.numeric(x)
+    }))
+
+  message("  Found ", nrow(df), " target occupations")
+  return(df)
+}
+
+oews_raw <- map(oews_folders, read_oews) |>
+  bind_rows() |>
+  arrange(occ_code, year)
+
+# Join with crosswalk — all SOC codes are unique, no dedup needed
+oews <- oews_raw |>
+  left_join(soc_crosswalk |> select(shrs_program, shrs_dept, soc_code),
+            by = c("occ_code" = "soc_code")) |>
+  select(year, shrs_program, shrs_dept, occ_code, occ_title,
+         tot_emp, a_mean, a_median,
+         a_pct10, a_pct25, a_pct75, a_pct90,
+         h_mean, h_median)
+```
+
+### Quick Check: OEWS Coverage
+
+```{r oews-check}
+oews |>
+  group_by(shrs_program, occ_code) |>
+  summarise(
+    years_covered = n(),
+    year_min      = min(year),
+    year_max      = max(year),
+    .groups       = "drop"
+  )
+```
+
+### Preview
+
+```{r oews-preview}
+oews |>
+  select(year, shrs_program, tot_emp, a_median) |>
+  pivot_wider(names_from = year, values_from = c(tot_emp, a_median))
+```
+
+---
+
+# 3 — BLS Employment Projections (Multiple Cycles)
+
+Each projection cycle lives in its own subfolder as `occupation.xlsx` (archived
+ZIPs) or as a loose file in the `projections/` folder (latest cycle). The data
+we need is always in **Table 1.2**.
+
+```{r projections-load}
+proj_files <- list.files(PROJ_PATH, pattern = "occupation\\.xlsx$",
+                          recursive = TRUE, full.names = TRUE,
+                          ignore.case = TRUE)
+
+read_projection <- function(file_path) {
+  df <- read_excel(file_path, sheet = "Table 1.2", skip = 1,
+                   col_types = "text") |>
+    clean_names()
+
+  col_names <- names(df)
+
+  names(df)[1] <- "occupation_title"
+  names(df)[2] <- "soc_code"
+  names(df)[3] <- "occupation_type"
+
+  year_nums <- str_extract_all(paste(col_names, collapse = " "), "20\\d{2}") |>
+    unlist() |>
+    unique() |>
+    as.integer() |>
+    sort()
+
+  base_year <- year_nums[1]
+  proj_year <- year_nums[length(year_nums)]
+
+  names(df)[4] <- "emp_base"
+  names(df)[5] <- "emp_projected"
+
+  pct_change_col <- str_which(col_names, "change.*percent|percent.*change")
+  if (length(pct_change_col) > 0) {
+    names(df)[pct_change_col[length(pct_change_col)]] <- "emp_change_pct"
+  }
+
+  openings_col <- str_which(col_names, "openings")
+  if (length(openings_col) > 0) {
+    names(df)[openings_col[1]] <- "annual_openings"
+  }
+
+  wage_col <- str_which(col_names, "median.*wage|wage.*median")
+  if (length(wage_col) > 0) {
+    names(df)[wage_col[1]] <- "median_wage"
+  }
+
+  edu_col <- str_which(col_names, "education")
+  if (length(edu_col) > 0) {
+    names(df)[edu_col[1]] <- "typical_education"
+  }
+
+  available <- intersect(
+    c("occupation_title", "soc_code", "occupation_type",
+      "emp_base", "emp_projected", "emp_change_pct",
+      "annual_openings", "median_wage", "typical_education"),
+    names(df)
+  )
+
+  df <- df |>
+    select(all_of(available)) |>
+    filter(soc_code %in% target_socs,
+           occupation_type == "Line item") |>
+    mutate(
+      base_year = base_year,
+      proj_year = proj_year,
+      cycle     = paste0(base_year, "-", proj_year)
+    )
+
+  numeric_cols <- intersect(c("emp_base", "emp_projected", "emp_change_pct",
+                                "annual_openings", "median_wage"), available)
+  df <- df |>
+    mutate(across(all_of(numeric_cols), ~ {
+      x <- str_remove_all(.x, ",")
+      x <- na_if(x, "\u2014")
+      x <- na_if(x, "--")
+      as.numeric(x)
+    }))
+
+  return(df)
+}
+
+projections_raw <- map(proj_files, possibly(read_projection, otherwise = NULL)) |>
+  compact() |>
+  bind_rows() |>
+  arrange(soc_code, base_year)
+
+projections <- projections_raw |>
+  left_join(soc_crosswalk |> select(shrs_program, shrs_dept, soc_code),
+            by = c("soc_code" = "soc_code")) |>
+  select(cycle, base_year, proj_year, shrs_program, shrs_dept,
+         soc_code, occ_title = occupation_title,
+         emp_base, emp_projected, emp_change_pct,
+         any_of(c("annual_openings", "median_wage", "typical_education")))
+```
+
+### Quick Check: Projection Cycles Loaded
+
+```{r proj-check}
+projections |>
+  group_by(cycle) |>
+  summarise(
+    n_occupations = n(),
+    soc_codes     = paste(unique(soc_code), collapse = ", "),
+    .groups       = "drop"
+  )
+```
+
+### Preview: Latest Cycle
+
+```{r proj-preview}
+projections |>
+  filter(base_year == max(base_year)) |>
+  select(shrs_program, cycle, emp_base, emp_projected,
+         emp_change_pct, annual_openings, median_wage)
+```
+
+---
+
+# 4 — Separations & Openings (Latest Cycle Only)
+
+```{r separations-load}
+latest_proj_file <- proj_files[which.max(
+  str_extract(proj_files, "\\d{4}") |> as.integer()
+)]
+
+root_file <- file.path(PROJ_PATH, "occupation.xlsx")
+if (file.exists(root_file)) latest_proj_file <- root_file
+
+separations <- read_excel(latest_proj_file, sheet = "Table 1.10", skip = 1,
+                           col_types = "text") |>
+  clean_names()
+
+names(separations)[1] <- "occupation_title"
+names(separations)[2] <- "soc_code"
+names(separations)[3] <- "occupation_type"
+names(separations)[4] <- "emp_base"
+names(separations)[5] <- "emp_projected"
+names(separations)[6] <- "emp_change_numeric"
+names(separations)[7] <- "emp_change_pct"
+names(separations)[8] <- "lf_exit_rate"
+names(separations)[9] <- "occ_transfer_rate"
+names(separations)[10] <- "total_sep_rate"
+names(separations)[11] <- "lf_exits"
+names(separations)[12] <- "occ_transfers"
+names(separations)[13] <- "total_separations"
+names(separations)[14] <- "annual_openings"
+
+separations <- separations |>
+  filter(soc_code %in% target_socs,
+         occupation_type == "Line item") |>
+  mutate(across(-c(occupation_title, soc_code, occupation_type), ~ {
+    x <- str_remove_all(.x, ",")
+    x <- na_if(x, "\u2014")
+    as.numeric(x)
+  })) |>
+  left_join(soc_crosswalk |> select(shrs_program, shrs_dept, soc_code),
+            by = c("soc_code" = "soc_code"))
+```
+
+```{r separations-preview}
+separations |>
+  select(shrs_program, soc_code, lf_exit_rate, occ_transfer_rate,
+         total_sep_rate, annual_openings)
+```
+
+---
+
+# 5 — Labor Force Projections
+
+```{r labor-force-load}
+labor_force <- read_excel(LABOR_FORCE_PATH, sheet = "Table 3.1", skip = 1,
+                           col_types = "text") |>
+  clean_names() |>
+  slice(1) |>
+  mutate(across(-1, ~ as.numeric(str_remove_all(.x, ","))))
+
+lf_summary <- tibble(
+  metric = c("Labor Force 2004 (thousands)",
+             "Labor Force 2014 (thousands)",
+             "Labor Force 2024 (thousands)",
+             "Labor Force 2034 (thousands)",
+             "Growth 2014-24 (%)",
+             "Growth 2024-34 (%)"),
+  value  = c(
+    as.numeric(labor_force[[2]]),
+    as.numeric(labor_force[[3]]),
+    as.numeric(labor_force[[4]]),
+    as.numeric(labor_force[[5]]),
+    as.numeric(labor_force[[10]]),
+    as.numeric(labor_force[[11]])
+  )
+)
+
+lf_growth_2024_2034 <- as.numeric(labor_force[[11]])
+```
+
+```{r lf-preview}
+lf_summary
+```
+
+---
+
+# 6 — Aggregate Economy
+
+```{r agg-econ-load}
+agg_econ <- read_excel(AGG_ECON_PATH, sheet = "Table 4.1", skip = 1,
+                        col_types = "text") |>
+  clean_names()
+
+agg_summary <- agg_econ |>
+  filter(str_detect(category,
+    regex("total population|civilian labor force$|gdp|productivity",
+          ignore_case = TRUE))) |>
+  mutate(across(-category, ~ as.numeric(str_remove_all(.x, ","))))
+```
+
+```{r agg-preview}
+agg_summary
+```
+
+---
+
+# 7 — Industry Employment
+
+```{r industry-load}
+industry <- read_excel(INDUSTRY_PATH, sheet = "Table 2.1", skip = 1,
+                        col_types = "text") |>
+  clean_names()
+
+industry <- industry |>
+  mutate(across(-1, ~ as.numeric(str_remove_all(.x, ","))))
+```
+
+```{r industry-preview}
+industry |> head(15)
+```
+
+---
+
+# 8 — All-Occupations Benchmark
+
+```{r benchmark}
+all_occ_benchmark <- read_excel(
+  latest_proj_file, sheet = "Table 1.2", skip = 1, col_types = "text"
+) |>
+  clean_names() |>
+  slice(1) |>
+  mutate(across(everything(), ~ {
+    x <- str_remove_all(.x, ",")
+    x <- na_if(x, "\u2014")
+    x
+  }))
+
+col_names_bench <- names(all_occ_benchmark)
+pct_col <- str_which(col_names_bench, "change.*percent|percent.*change")
+all_occ_growth_pct <- as.numeric(all_occ_benchmark[[pct_col[length(pct_col)]]])
+```
+
+```{r benchmark-preview}
+cat("All-occupations projected growth (latest cycle):",
+    all_occ_growth_pct, "%\n")
+cat("Labor force projected growth 2024-34:",
+    lf_growth_2024_2034, "%\n")
+```
+
+---
+
+# 9 — BLS Education & Training Data
+
+## 9.1 Table 5.1 — Earnings & Unemployment by Education Level
+
+```{r edu-51-load}
+edu_premium <- read_excel(EDUCATION_PATH, sheet = "Table 5.1", skip = 1,
+                           col_types = "text") |>
+  clean_names()
+
+names(edu_premium) <- c("edu_level", "median_weekly_earnings", "unemployment_rate")
+
+edu_premium <- edu_premium |>
+  filter(!is.na(edu_level),
+         !str_detect(edu_level, regex("note|source|total", ignore_case = TRUE))) |>
+  mutate(
+    median_weekly_earnings = as.numeric(median_weekly_earnings),
+    unemployment_rate      = as.numeric(unemployment_rate),
+    median_annual_earnings = median_weekly_earnings * 52
+  )
+```
+
+```{r edu-51-preview}
+edu_premium
+```
+
+## 9.2 Table 5.2 — Employment & Projections by Entry-Level Education
+
+```{r edu-52-load}
+edu_employment <- read_excel(EDUCATION_PATH, sheet = "Table 5.2", skip = 1,
+                              col_types = "text") |>
+  clean_names()
+
+names(edu_employment) <- c("edu_level", "emp_2024", "emp_2034",
+                            "emp_dist_2024", "emp_dist_2034",
+                            "emp_change_num", "emp_change_pct", "median_wage")
+
+edu_employment <- edu_employment |>
+  filter(!is.na(edu_level),
+         !str_detect(edu_level, regex("note|source|footnote|^\\[", ignore_case = TRUE))) |>
+  mutate(
+    edu_level = str_trim(edu_level),
+    across(-edu_level, ~ {
+      x <- str_remove_all(.x, ",")
+      as.numeric(x)
+    })
+  )
+```
+
+```{r edu-52-preview}
+edu_employment
+```
+
+## 9.3 Table 5.3 — Actual Educational Attainment by Occupation
+
+```{r edu-53-load}
+edu_attainment <- read_excel(EDUCATION_PATH, sheet = "Table 5.3", skip = 1,
+                              col_types = "text") |>
+  clean_names()
+
+names(edu_attainment) <- c("occupation_title", "soc_code",
+                            "less_than_hs", "hs_diploma", "some_college",
+                            "associates", "bachelors", "masters", "doctoral")
+
+edu_attainment_shrs <- edu_attainment |>
+  filter(soc_code %in% target_socs) |>
+  mutate(across(-c(occupation_title, soc_code), as.numeric)) |>
+  left_join(soc_crosswalk |> select(shrs_program, shrs_dept, soc_code),
+            by = "soc_code")
+```
+
+```{r edu-53-preview}
+edu_attainment_shrs |>
+  select(shrs_program, occupation_title, bachelors, masters, doctoral)
+```
+
+## 9.4 Table 5.4 — BLS Education & Training Assignments
+
+```{r edu-54-load}
+edu_requirements <- read_excel(EDUCATION_PATH, sheet = "Table 5.4", skip = 1,
+                                col_types = "text") |>
+  clean_names()
+
+names(edu_requirements) <- c("occupation_title", "soc_code",
+                              "typical_entry_education", "work_experience",
+                              "ojt_required", "ooh_link")
+
+edu_requirements_shrs <- edu_requirements |>
+  filter(soc_code %in% target_socs) |>
+  left_join(soc_crosswalk |> select(shrs_program, shrs_dept, soc_code),
+            by = "soc_code")
+```
+
+```{r edu-54-preview}
+edu_requirements_shrs |>
+  select(shrs_program, occupation_title, typical_entry_education,
+         work_experience, ojt_required)
+```
+
+---
+
+# 10 — Industry Employment Matrix
+
+```{r ind-matrix-load}
+ind_matrix <- read_csv(IND_MATRIX_PATH, col_types = cols(.default = "c")) |>
+  clean_names()
+
+ind_matrix <- ind_matrix |>
+  mutate(occupation_code = str_remove_all(occupation_code, '[="]'))
+
+num_cols <- c("x2024_employment", "x2024_percent_of_industry",
+              "x2024_percent_of_occupation",
+              "projected_2034_employment",
+              "projected_2034_percent_of_industry",
+              "projected_2034_percent_of_occupation",
+              "employment_change_2024_2034",
+              "employment_percent_change_2024_2034")
+
+ind_matrix <- ind_matrix |>
+  mutate(across(any_of(num_cols), ~ as.numeric(str_remove_all(.x, ","))))
+
+ind_total <- ind_matrix |> slice(1)
+
+ind_matrix_shrs <- ind_matrix |>
+  filter(occupation_code %in% target_socs) |>
+  left_join(soc_crosswalk |> select(shrs_program, shrs_dept, soc_code),
+            by = c("occupation_code" = "soc_code"))
+
+socs_in_industry <- ind_matrix_shrs$occupation_code
+socs_missing <- setdiff(target_socs, socs_in_industry)
+```
+
+```{r ind-matrix-preview}
+cat("Industry: NAICS 621990 — All Other Misc Ambulatory Health Care\n")
+cat("Total industry employment 2024:", ind_total$x2024_employment, "thousand\n")
+cat("Projected 2034:", ind_total$projected_2034_employment, "thousand\n")
+cat("Growth:", ind_total$employment_percent_change_2024_2034, "%\n\n")
+
+cat("SHRS occupations FOUND in this industry:\n\n")
+ind_matrix_shrs |>
+  select(shrs_program, occupation_title,
+         emp_2024 = x2024_employment,
+         emp_2034 = projected_2034_employment,
+         pct_change = employment_percent_change_2024_2034,
+         pct_of_occ = x2024_percent_of_occupation) |>
+  print()
+
+cat("\nSHRS SOC codes NOT in this industry:", paste(socs_missing, collapse = ", "), "\n")
+cat("(These occupations are concentrated in other industries)\n")
+```
+
+---
+
+# Summary
+
+All data is now loaded and cleaned in memory. The key objects available for
+analysis in `market_02_analysis.Rmd` are:
+
+| Object | Description |
+|---|---|
+| `oews` | Historical employment & wages by SOC, 2014–2024 |
+| `projections` | BLS 10-year projections across multiple cycles |
+| `separations` | Job openings breakdown (latest cycle) |
+| `labor_force` / `lf_summary` | Overall labor force projections |
+| `agg_econ` / `agg_summary` | GDP and macro context |
+| `industry` | Industry employment projections |
+| `soc_crosswalk` | SHRS program ↔ SOC code mapping (9 programs, 9 unique SOCs) |
+| `all_occ_growth_pct` | Benchmark growth rate for all occupations |
+| `lf_growth_2024_2034` | Benchmark labor force growth rate |
+| `edu_premium` | Table 5.1 — earnings & unemployment by education level |
+| `edu_employment` | Table 5.2 — employment projections by education tier |
+| `edu_attainment_shrs` | Table 5.3 — actual workforce education distribution |
+| `edu_requirements_shrs` | Table 5.4 — BLS entry-level education assignments |
+| `ind_matrix` | Full industry employment matrix (NAICS 621990) |
+| `ind_matrix_shrs` | SHRS-specific rows from industry matrix |
+| `socs_missing` | SOC codes absent from the industry matrix |
