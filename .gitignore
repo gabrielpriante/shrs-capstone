@@ -10,5 +10,8 @@
 analysis/market/*.html
 analysis/market/*.R
 
+# Allow v3 projections dashboard HTML outputs
+!analysis/market_v3/projections_analysis/**/*.html
+
 # Mac files
 .DS_Store
