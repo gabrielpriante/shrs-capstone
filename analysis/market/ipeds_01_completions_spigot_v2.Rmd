@@ -1,0 +1,881 @@
+---
+title: "SHRS Market Analysis — IPEDS Graduate Production (The Spigot)"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+# 0 — Purpose & Context
+
+This file answers a fundamental question: **how many graduates are being
+produced nationally to fill the replacement demand that BLS projects?**
+
+BLS projections tell us how many job openings exist (the "holes"). IPEDS
+completions data tells us how many graduates are being produced to fill them
+(the "spigot"). By comparing the two, we can assess whether the labor market
+for each SHRS occupation is undersupplied, oversupplied, or in equilibrium.
+
+We pull completions by 6-digit CIP code, broken out by award level
+(Bachelor's, Master's, Doctorate), and trend them over time. We also break
+out national vs. Pennsylvania production, and project forward using simple
+trend models.
+
+---
+
+# 1 — Setup
+
+## 1.1 Packages
+
+```{r packages}
+# ── Core tidyverse ──
+library(tidyverse)
+
+# ── API access ──
+# install.packages("educationdata")
+# OR: devtools::install_github("UrbanInstitute/education-data-package-r")
+library(educationdata)
+
+# ── Display ──
+library(scales)
+library(kableExtra)
+```
+
+## 1.2 CIP Code Crosswalk
+
+Each SHRS program maps to one or more 6-digit CIP codes. The Urban Institute
+API expects CIP codes as integers (no dots), so `51.0203` becomes `510203`.
+
+We also include the SOC code link back to the BLS data from File 1/2 so
+downstream joins are trivial.
+
+```{r cip-crosswalk}
+# ═══════════════════════════════════════════════════════════════════════════
+# CIP ↔ SHRS Program ↔ SOC Crosswalk
+# ─────────────────────────────────────────────────────────────────────────
+# Notes:
+#   - CIP codes here use the 2020 CIP taxonomy (current as of IPEDS 2020-21+)
+#   - Some programs map to multiple CIPs (e.g., SLP has its own code + a
+#     combined SLP/AuD code). We include both to capture all completions.
+#   - `cip_6digit` is the integer form for the API (no dots)
+#   - `cip_display` is the human-readable form (with dots)
+# ═══════════════════════════════════════════════════════════════════════════
+
+cip_crosswalk <- tribble(
+  ~shrs_program, ~shrs_dept, ~soc_code,  ~cip_6digit, ~cip_display, ~cip_title,
+  
+  # ── Communication Science & Disorders (CSD) ──
+  "SLP",         "CSD",      "29-1127",  510203L,     "51.0203",    "Speech-Language Pathology/Pathologist",
+  "SLP",         "CSD",      "29-1127",  510204L,     "51.0204",    "Audiology/Audiologist and SLP (Combined)",
+  "AuD",         "CSD",      "29-1181",  510202L,     "51.0202",    "Audiology/Audiologist",
+  "AuD",         "CSD",      "29-1181",  510204L,     "51.0204",    "Audiology/Audiologist and SLP (Combined)",
+  
+  # ── Sports Medicine & Nutrition (SMN) ──
+  "DN",          "SMN",      "29-1031",  513101L,     "51.3101",    "Dietetics/Dietitian",
+  "DN",          "SMN",      "29-1031",  513104L,     "51.3104",    "Dietitian Assistant",
+  "AT",          "SMN",      "29-9091",  510913L,     "51.0913",    "Athletic Training/Trainer",
+  "SS",          "SMN",      "29-1128",  260908L,     "26.0908",    "Exercise Physiology and Kinesiology",
+  "SS",          "SMN",      "29-1128",  310505L,     "31.0505",    "Kinesiology and Exercise Science",
+  
+  # ── Rehabilitation Science & Technology (RST) ──
+  "OTD",         "RST",      "29-1122",  512306L,     "51.2306",    "Occupational Therapy/Therapist",
+  "DPT",         "RST",      "29-1123",  512308L,     "51.2308",    "Physical Therapy/Therapist",
+  
+  # ── Physician Assistant Studies (PAS) ──
+  "PAS",         "PAS",      "29-1071",  510912L,     "51.0912",    "Physician Assistant",
+  
+  # ── Health Information Management (HIM) ──
+  "HIM",         "HIM",      "29-9021",  510706L,     "51.0706",    "Health Information/Medical Records Administration",
+  "HIM",         "HIM",      "29-9021",  510707L,     "51.0707",    "Health Information/Medical Records Technology/Technician"
+)
+
+# Unique CIP codes to pull from the API
+target_cips <- unique(cip_crosswalk$cip_6digit)
+
+cat("Target CIP codes:", paste(target_cips, collapse = ", "), "\n")
+cat("SHRS programs covered:", paste(unique(cip_crosswalk$shrs_program), collapse = ", "), "\n")
+```
+
+## 1.3 Award Level Reference
+
+IPEDS award levels are coded as integers. We only care about degree-level
+awards for our programs (not certificates).
+
+```{r award-levels}
+# ═══════════════════════════════════════════════════════════════════════════
+# IPEDS Award Level Codes
+# ─────────────────────────────────────────────────────────────────────────
+# These are the standard IPEDS award level codes used in the completions
+# survey. The Urban Institute API uses the same codes.
+#
+# We focus on levels 5 (Bachelor's), 7 (Master's), 17 (Doctor's -
+# Professional Practice), and 18 (Doctor's - Research/Scholarship).
+# Level 17 is the relevant doctoral for clinical programs like AuD, DPT.
+# Level 18 captures PhD/research doctorates.
+# ═══════════════════════════════════════════════════════════════════════════
+
+award_level_labels <- tribble(
+  ~award_level, ~award_label,          ~degree_group,
+  1L,           "< 1 year Certificate", "Certificate",
+  2L,           "1-2 year Certificate",  "Certificate",
+  3L,           "Associate's",           "Associate's",
+  4L,           "2-4 year Certificate",  "Certificate",
+  5L,           "Bachelor's",            "Bachelor's",
+  6L,           "Postbacc Certificate",  "Certificate",
+  7L,           "Master's",              "Master's",
+  8L,           "Post-Master's Cert",    "Certificate",
+  17L,          "Doctorate - Professional Practice", "Doctorate",
+  18L,          "Doctorate - Research",  "Doctorate",
+  19L,          "Doctorate - Other",     "Doctorate"
+)
+
+# The degree levels we care about for the spigot analysis
+degree_levels <- c(5L, 7L, 17L, 18L, 19L)
+degree_labels <- award_level_labels |> filter(award_level %in% degree_levels)
+```
+
+## 1.4 FIPS Code for Pennsylvania
+
+```{r fips}
+# Pennsylvania FIPS code for state-level filtering
+PA_FIPS <- 42L
+
+# Regional FIPS codes (PA + bordering states: OH, WV, MD, NY, NJ, DE, VA)
+REGIONAL_FIPS <- c(
+  42L,  # Pennsylvania
+  39L,  # Ohio
+  54L,  # West Virginia
+  24L,  # Maryland
+  36L,  # New York
+  34L,  # New Jersey
+  10L,  # Delaware
+  51L   # Virginia
+)
+
+regional_fips_labels <- tribble(
+  ~fips, ~state_abbr, ~state_name,
+  42L,   "PA", "Pennsylvania",
+  39L,   "OH", "Ohio",
+  54L,   "WV", "West Virginia",
+  24L,   "MD", "Maryland",
+  36L,   "NY", "New York",
+  34L,   "NJ", "New Jersey",
+  10L,   "DE", "Delaware",
+  51L,   "VA", "Virginia"
+)
+```
+
+---
+
+# 2 — Pull IPEDS Completions Data via API
+
+We use the Urban Institute's `educationdata` R package to pull completions
+by 6-digit CIP code. This hits the IPEDS completions-cip-6 endpoint, which
+returns institution-level award counts by CIP, award level, and year.
+
+**Important**: The API can be slow for large pulls. We request one CIP at a
+time and cache the results. If the API is unavailable or data is incomplete,
+Section 2.2 provides a CSV fallback path.
+
+## 2.1 API Pull
+
+```{r api-pull, cache=TRUE}
+# ═══════════════════════════════════════════════════════════════════════════
+# Pull completions data from the Urban Institute Education Data API
+# ─────────────────────────────────────────────────────────────────────────
+# Strategy:
+#   - Pull one CIP × year combination at a time (most reliable)
+#   - Request years 2012-2022 (reliable range for 6-digit CIP data)
+#   - add_labels = FALSE (we apply our own labels downstream)
+#
+# The API returns one row per institution × year × CIP × award level × 
+# race × sex. We aggregate up from there.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Year range — Urban Institute typically has data through 2022
+YEAR_START <- 2012L
+YEAR_END   <- 2022L
+
+pull_one_cip_year <- function(cip_code, yr) {
+  tryCatch({
+    df <- get_education_data(
+      level   = "college-university",
+      source  = "ipeds",
+      topic   = "completions-cip-6",
+      filters = list(
+        year           = yr,
+        cipcode_6digit = cip_code
+      ),
+      add_labels = FALSE
+    )
+    return(df)
+  }, error = function(e) {
+    message("  ERROR: CIP ", cip_code, " / year ", yr, ": ", e$message)
+    return(NULL)
+  })
+}
+
+# Build grid of all CIP × year combinations
+pull_grid <- expand.grid(
+  cip  = target_cips,
+  year = YEAR_START:YEAR_END,
+  stringsAsFactors = FALSE
+)
+
+message("Pulling ", nrow(pull_grid), " CIP × year combinations ...")
+
+# Pull one at a time — slow but reliable
+raw_completions_list <- map2(
+  pull_grid$cip, pull_grid$year,
+  ~ {
+    message("  CIP ", .x, " / ", .y)
+    pull_one_cip_year(.x, .y)
+  }
+)
+
+raw_completions <- bind_rows(compact(raw_completions_list))
+
+cat("Total raw rows:", nrow(raw_completions), "\n")
+if (nrow(raw_completions) > 0) {
+  cat("Years covered:", paste(range(raw_completions$year), collapse = " to "), "\n")
+  cat("CIP codes retrieved:", length(unique(raw_completions$cipcode_6digit)), "\n")
+  cat("Columns:", paste(names(raw_completions), collapse = ", "), "\n")
+} else {
+  stop("API returned 0 rows. Check your internet connection and try again.")
+}
+```
+
+## 2.2 Fallback: CSV Path (If API Is Unavailable)
+
+If the API pull above fails or returns incomplete data, you can download the
+IPEDS completions data manually from NCES and load it here instead.
+
+```{r csv-fallback, eval=FALSE}
+# ═══════════════════════════════════════════════════════════════════════════
+# FALLBACK: Manual CSV load
+# ─────────────────────────────────────────────────────────────────────────
+# 1. Go to https://nces.ed.gov/ipeds/use-the-data
+# 2. Click "Download Survey Data" → "Complete Data Files"
+# 3. Download the Completions (C20XX) files for each year you need
+# 4. Place the extracted CSVs in your SHRS_Analysis folder
+# 5. Update the path below and set eval=TRUE on this chunk
+# ═══════════════════════════════════════════════════════════════════════════
+
+# CSV_PATH <- file.path(path.expand("~"), "Documents", "SHRS_Analysis",
+#                        "market_analysis", "ipeds")
+# 
+# csv_files <- list.files(CSV_PATH, pattern = "c\\d{4}.*\\.csv$",
+#                          full.names = TRUE, ignore.case = TRUE)
+# 
+# raw_completions <- map(csv_files, read_csv, col_types = cols(.default = "c")) |>
+#   bind_rows() |>
+#   clean_names() |>
+#   filter(cipcode %in% gsub("(\\d{2})(\\d{4})", "\\1.\\2", target_cips))
+```
+
+---
+
+# 3 — Clean & Aggregate
+
+## 3.1 Filter to Degree-Level Awards and Aggregate Nationally
+
+```{r clean-aggregate}
+# ═══════════════════════════════════════════════════════════════════════════
+# Cleaning pipeline
+# ─────────────────────────────────────────────────────────────────────────
+# Raw data is at institution × year × CIP × award_level × race × sex.
+# We aggregate to get total completions at three levels:
+#   1. National totals by CIP × award level × year
+#   2. State-level totals by CIP × award level × year × FIPS
+#   3. Institution-level totals by CIP × award level × year × unitid
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Ensure cipcode_6digit is integer for joining
+completions_clean <- raw_completions |>
+  mutate(
+    cipcode_6digit = as.integer(cipcode_6digit),
+    award_level    = as.integer(award_level),
+    awards         = as.numeric(awards_6digit),
+    fips           = as.integer(fips)
+  ) |>
+  # Filter to degree-level awards only (drop certificates)
+  filter(award_level %in% degree_levels) |>
+  # Drop rows with 0 or NA awards
+  filter(!is.na(awards), awards > 0) |>
+  # Join to our crosswalk to get SHRS program labels
+  inner_join(
+    cip_crosswalk |> select(cip_6digit, shrs_program, shrs_dept, soc_code),
+    by = c("cipcode_6digit" = "cip_6digit")
+  ) |>
+  # Join award level labels
+  left_join(award_level_labels, by = "award_level")
+```
+
+## 3.2 Build Aggregation Tiers
+
+```{r build-tiers}
+# ─── TIER 1: National totals by program × degree level × year ───────────
+national_completions <- completions_clean |>
+  group_by(year, shrs_program, shrs_dept, soc_code,
+           award_level, award_label, degree_group) |>
+  summarise(
+    total_awards    = sum(awards, na.rm = TRUE),
+    n_institutions  = n_distinct(unitid),
+    .groups         = "drop"
+  ) |>
+  arrange(shrs_program, degree_group, year)
+
+# ─── TIER 2: State-level totals ────────────────────────────────────────
+state_completions <- completions_clean |>
+  group_by(year, fips, shrs_program, shrs_dept, soc_code,
+           award_level, award_label, degree_group) |>
+  summarise(
+    total_awards    = sum(awards, na.rm = TRUE),
+    n_institutions  = n_distinct(unitid),
+    .groups         = "drop"
+  ) |>
+  arrange(shrs_program, fips, year)
+
+# ─── TIER 3: PA-specific and Regional ──────────────────────────────────
+pa_completions <- state_completions |>
+  filter(fips == PA_FIPS)
+
+regional_completions <- state_completions |>
+  filter(fips %in% REGIONAL_FIPS) |>
+  left_join(regional_fips_labels, by = "fips")
+
+# ─── TIER 4: Institution-level (for competitor analysis later) ──────────
+institution_completions <- completions_clean |>
+  group_by(year, unitid, fips, shrs_program, shrs_dept, soc_code,
+           award_level, award_label, degree_group) |>
+  summarise(
+    total_awards = sum(awards, na.rm = TRUE),
+    .groups      = "drop"
+  )
+
+cat("National completions rows:", nrow(national_completions), "\n")
+cat("State completions rows:", nrow(state_completions), "\n")
+cat("PA completions rows:", nrow(pa_completions), "\n")
+cat("Institution completions rows:", nrow(institution_completions), "\n")
+```
+
+---
+
+# 4 — National Completions Trends
+
+## 4.1 Total Graduates Over Time by Program
+
+```{r national-trend-plot, fig.height=8}
+# Aggregate across all degree levels for headline trend
+national_total <- national_completions |>
+  group_by(year, shrs_program, shrs_dept) |>
+  summarise(total_awards = sum(total_awards), .groups = "drop")
+
+national_total |>
+  ggplot(aes(x = year, y = total_awards, color = shrs_program)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  facet_wrap(~ shrs_program, scales = "free_y", ncol = 2) +
+  scale_y_continuous(labels = comma) +
+  scale_x_continuous(breaks = seq(YEAR_START, YEAR_END, 2)) +
+  labs(
+    title    = "National Graduate Production by SHRS-Aligned CIP Code",
+    subtitle = "Total degrees conferred (Bachelor's + Master's + Doctorate)",
+    caption  = "Source: IPEDS Completions via Urban Institute Education Data Portal",
+    x = NULL, y = "Total Degrees Conferred"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 4.2 Completions by Degree Level
+
+This is the key chart Dave asked for — see the "height of the Master's line"
+and how each degree level is trending.
+
+```{r degree-level-trend, fig.height=10}
+national_completions |>
+  ggplot(aes(x = year, y = total_awards, color = degree_group,
+             linetype = degree_group)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2) +
+  facet_wrap(~ shrs_program, scales = "free_y", ncol = 2) +
+  scale_y_continuous(labels = comma) +
+  scale_x_continuous(breaks = seq(YEAR_START, YEAR_END, 2)) +
+  scale_color_manual(values = c(
+    "Bachelor's" = "#2c7bb6",
+    "Master's"   = "#d7191c",
+    "Doctorate"  = "#1a9641"
+  )) +
+  labs(
+    title    = "National Completions by Degree Level Over Time",
+    subtitle = "Track the shift: are programs moving upward in degree level?",
+    caption  = "Source: IPEDS Completions via Urban Institute Education Data Portal",
+    x = NULL, y = "Degrees Conferred", color = "Degree Level",
+    linetype = "Degree Level"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 4.3 Degree Mix Shift (Proportion by Level)
+
+```{r degree-mix, fig.height=8}
+national_completions |>
+  group_by(year, shrs_program) |>
+  mutate(pct = total_awards / sum(total_awards) * 100) |>
+  ungroup() |>
+  ggplot(aes(x = year, y = pct, fill = degree_group)) +
+  geom_area(alpha = 0.8) +
+  facet_wrap(~ shrs_program, ncol = 2) +
+  scale_fill_manual(values = c(
+    "Bachelor's" = "#2c7bb6",
+    "Master's"   = "#d7191c",
+    "Doctorate"  = "#1a9641"
+  )) +
+  scale_x_continuous(breaks = seq(YEAR_START, YEAR_END, 2)) +
+  labs(
+    title    = "Degree Mix Over Time: Are Programs Shifting Upward?",
+    subtitle = "Share of completions by degree level",
+    caption  = "Source: IPEDS Completions via Urban Institute Education Data Portal",
+    x = NULL, y = "% of Total Completions", fill = "Degree Level"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 4.4 Growth Rates Summary
+
+```{r growth-rates}
+# Calculate CAGR and absolute change over the full period
+growth_summary <- national_total |>
+  group_by(shrs_program) |>
+  summarise(
+    first_year     = min(year),
+    last_year      = max(year),
+    awards_start   = first(total_awards),
+    awards_end     = last(total_awards),
+    abs_change     = last(total_awards) - first(total_awards),
+    pct_change     = round((last(total_awards) / first(total_awards) - 1) * 100, 1),
+    n_years        = last_year - first_year,
+    cagr           = round((((last(total_awards) / first(total_awards))^
+                              (1 / n_years)) - 1) * 100, 2),
+    .groups        = "drop"
+  )
+
+growth_summary |>
+  select(
+    Program        = shrs_program,
+    `Start Year`   = first_year,
+    `End Year`     = last_year,
+    `Awards Start` = awards_start,
+    `Awards End`   = awards_end,
+    `Change`       = abs_change,
+    `Growth (%)`   = pct_change,
+    `CAGR (%)`     = cagr
+  ) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 5 — Pennsylvania vs. National
+
+## 5.1 PA Share of National Production
+
+```{r pa-share, fig.height=6}
+pa_total <- pa_completions |>
+  group_by(year, shrs_program) |>
+  summarise(pa_awards = sum(total_awards), .groups = "drop")
+
+pa_vs_national <- national_total |>
+  left_join(pa_total, by = c("year", "shrs_program")) |>
+  mutate(
+    pa_awards = replace_na(pa_awards, 0),
+    pa_share  = pa_awards / total_awards * 100
+  )
+
+pa_vs_national |>
+  ggplot(aes(x = year, y = pa_share, color = shrs_program)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2) +
+  facet_wrap(~ shrs_program, ncol = 2) +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  scale_x_continuous(breaks = seq(YEAR_START, YEAR_END, 2)) +
+  labs(
+    title    = "Pennsylvania's Share of National Graduate Production",
+    subtitle = "What fraction of the national spigot comes from PA?",
+    caption  = "Source: IPEDS Completions via Urban Institute Education Data Portal",
+    x = NULL, y = "PA Share of National Completions (%)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 5.2 Regional Production (PA + Bordering States)
+
+```{r regional-production, fig.height=8}
+regional_total <- regional_completions |>
+  group_by(year, shrs_program, state_abbr) |>
+  summarise(total_awards = sum(total_awards), .groups = "drop")
+
+regional_total |>
+  ggplot(aes(x = year, y = total_awards, fill = state_abbr)) +
+  geom_col(position = "stack") +
+  facet_wrap(~ shrs_program, scales = "free_y", ncol = 2) +
+  scale_y_continuous(labels = comma) +
+  scale_x_continuous(breaks = seq(YEAR_START, YEAR_END, 2)) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title    = "Regional Graduate Production (PA + Bordering States)",
+    subtitle = "Where are the graduates being produced near Pitt?",
+    caption  = "Source: IPEDS Completions via Urban Institute Education Data Portal",
+    x = NULL, y = "Total Degrees Conferred", fill = "State"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+---
+
+# 6 — Simple Forward Projection
+
+Use a linear trend to project completions forward, giving Dave the
+"future numbers" he asked for. We project 5 years beyond the last observed
+year.
+
+**Caveat**: These are simple trend extrapolations, not structural models.
+They assume recent historical patterns continue.
+
+```{r forward-projection, fig.height=8}
+# ═══════════════════════════════════════════════════════════════════════════
+# Linear trend projection
+# ─────────────────────────────────────────────────────────────────────────
+# For each program × degree level, fit a simple linear model on the
+# historical data and project forward 5 years.
+# ═══════════════════════════════════════════════════════════════════════════
+
+PROJ_YEARS <- 5
+last_data_year <- max(national_completions$year, na.rm = TRUE)
+future_years <- tibble(year = (last_data_year + 1):(last_data_year + PROJ_YEARS))
+
+# Fit linear models per program × degree group
+trend_models <- national_completions |>
+  group_by(shrs_program, degree_group) |>
+  summarise(
+    data = list(tibble(year = year, total_awards = total_awards)),
+    .groups = "drop"
+  ) |>
+  mutate(
+    model   = map(data, ~ lm(total_awards ~ year, data = .x)),
+    proj    = map(model, ~ predict(.x, newdata = future_years, se.fit = TRUE)),
+    proj_df = map(proj, ~ tibble(
+      year     = future_years$year,
+      fit      = pmax(.x$fit, 0),           # Floor at 0 (can't have negative grads)
+      se       = .x$se.fit,
+      lower_95 = pmax(.x$fit - 1.96 * .x$se.fit, 0),
+      upper_95 = pmax(.x$fit + 1.96 * .x$se.fit, 0)
+    ))
+  )
+
+# Extract projections
+projected_completions <- trend_models |>
+  select(shrs_program, degree_group, proj_df) |>
+  unnest(proj_df) |>
+  mutate(type = "Projected")
+
+# Combine historical + projected for plotting
+historical_for_plot <- national_completions |>
+  group_by(year, shrs_program, degree_group) |>
+  summarise(fit = sum(total_awards), .groups = "drop") |>
+  mutate(type = "Historical", se = NA_real_,
+         lower_95 = NA_real_, upper_95 = NA_real_)
+
+combined_trend <- bind_rows(historical_for_plot, projected_completions)
+
+combined_trend |>
+  ggplot(aes(x = year, y = fit, color = degree_group, linetype = type)) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(
+    data = combined_trend |> filter(type == "Projected"),
+    aes(ymin = lower_95, ymax = upper_95, fill = degree_group),
+    alpha = 0.15, linetype = 0
+  ) +
+  geom_vline(xintercept = last_data_year + 0.5, linetype = "dashed",
+             color = "gray50") +
+  annotate("text", x = last_data_year + 0.7, y = Inf, label = "Projected →",
+           hjust = 0, vjust = 1.5, size = 3, color = "gray40") +
+  facet_wrap(~ shrs_program, scales = "free_y", ncol = 2) +
+  scale_y_continuous(labels = comma) +
+  scale_color_manual(values = c(
+    "Bachelor's" = "#2c7bb6",
+    "Master's"   = "#d7191c",
+    "Doctorate"  = "#1a9641"
+  )) +
+  scale_fill_manual(values = c(
+    "Bachelor's" = "#2c7bb6",
+    "Master's"   = "#d7191c",
+    "Doctorate"  = "#1a9641"
+  )) +
+  labs(
+    title    = "Graduate Production: Historical Trend + 5-Year Projection",
+    subtitle = "Linear trend extrapolation with 95% confidence intervals",
+    caption  = paste0("Source: IPEDS Completions (", YEAR_START, "–",
+                      last_data_year, ") + linear projection"),
+    x = NULL, y = "Degrees Conferred", color = "Degree Level",
+    fill = "Degree Level"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 6.1 Projected Numbers Table
+
+```{r projection-table}
+projected_completions |>
+  mutate(
+    fit      = round(fit),
+    lower_95 = round(lower_95),
+    upper_95 = round(upper_95)
+  ) |>
+  select(
+    Program        = shrs_program,
+    `Degree Level` = degree_group,
+    Year           = year,
+    `Projected`    = fit,
+    `Lower 95% CI` = lower_95,
+    `Upper 95% CI` = upper_95
+  ) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  scroll_box(height = "400px")
+```
+
+---
+
+# 7 — Spigot vs. Demand: Supply-Demand Gap
+
+This is the synthesis: compare annual graduate production (the spigot) to
+BLS-projected annual openings (the holes).
+
+**To use this section, you must first run `market_01_data_prep.Rmd` and
+`market_02_analysis.Rmd`** so that the `separations` object is available.
+If running standalone, we provide the BLS numbers inline.
+
+```{r supply-demand-gap}
+# ═══════════════════════════════════════════════════════════════════════════
+# BLS Annual Openings (from market_02_analysis.Rmd separations table)
+# ─────────────────────────────────────────────────────────────────────────
+# If the separations object is not in memory, define the values manually
+# from your latest BLS projection cycle (2024–2034).
+# Annual openings are in thousands in the BLS data.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Try to use the separations object if available; otherwise define manually
+if (!exists("separations")) {
+  message("NOTE: 'separations' not in memory. Using manual BLS values.")
+  message("Update these when you have the latest projection numbers.")
+  
+  bls_openings <- tribble(
+    ~shrs_program, ~soc_code,   ~annual_openings_thousands,
+    "SLP",         "29-1127",   15.1,
+    "AuD",         "29-1181",   1.0,
+    "DN",          "29-1031",   9.1,
+    "AT",          "29-9091",   6.3,
+    "SS",          "29-1128",   1.8,
+    "OTD",         "29-1122",   10.4,
+    "DPT",         "29-1123",   13.9,
+    "PAS",         "29-1071",   12.8,
+    "HIM",         "29-9021",   10.6
+  ) |>
+    mutate(annual_openings = annual_openings_thousands * 1000)
+  
+} else {
+  bls_openings <- separations |>
+    select(shrs_program, soc_code, annual_openings) |>
+    mutate(annual_openings = annual_openings * 1000) # Convert from thousands
+}
+
+# Latest-year completions as the current "spigot" output
+latest_spigot <- national_total |>
+  filter(year == max(year)) |>
+  select(shrs_program, annual_graduates = total_awards, spigot_year = year)
+
+# Join and compute gap
+supply_demand <- bls_openings |>
+  left_join(latest_spigot, by = "shrs_program") |>
+  mutate(
+    gap              = annual_graduates - annual_openings,
+    gap_ratio        = round(annual_graduates / annual_openings, 2),
+    gap_signal       = case_when(
+      gap_ratio >= 1.5 ~ "Oversupplied",
+      gap_ratio >= 1.0 ~ "Balanced/Slight Surplus",
+      gap_ratio >= 0.7 ~ "Tight Market",
+      TRUE             ~ "Undersupplied"
+    )
+  )
+
+supply_demand |>
+  select(
+    Program              = shrs_program,
+    `BLS Annual Openings` = annual_openings,
+    `Annual Graduates`    = annual_graduates,
+    `Gap (Grads - Jobs)`  = gap,
+    `Supply/Demand Ratio` = gap_ratio,
+    Signal               = gap_signal
+  ) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r gap-chart, fig.height=5}
+supply_demand |>
+  select(shrs_program, `Annual Openings` = annual_openings,
+         `Annual Graduates` = annual_graduates) |>
+  pivot_longer(-shrs_program, names_to = "measure", values_to = "count") |>
+  ggplot(aes(x = reorder(shrs_program, count, max), y = count,
+             fill = measure)) +
+  geom_col(position = "dodge", width = 0.6) +
+  coord_flip() +
+  scale_y_continuous(labels = comma) +
+  scale_fill_manual(values = c("Annual Openings" = "#d7191c",
+                                "Annual Graduates" = "#2c7bb6")) +
+  labs(
+    title    = "Supply vs. Demand: Graduate Production vs. BLS Job Openings",
+    subtitle = "Are we producing enough graduates to fill the openings?",
+    x = NULL, y = "Annual Count", fill = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+---
+
+# 8 — Output Registry
+
+All modular outputs from this file, ready for downstream analysis.
+
+```{r output-registry}
+# ═══════════════════════════════════════════════════════════════════════════
+# OUTPUT REGISTRY
+# ─────────────────────────────────────────────────────────────────────────
+# Every object below is available for use in downstream Rmd files.
+# Source this file with:
+#   source(knitr::purl("ipeds_01_completions_spigot.Rmd",
+#                       output = tempfile(), quiet = TRUE))
+#
+# Key objects:
+# ─────────────────────────────────────────────────────────────────────────
+#   CROSSWALKS & REFERENCE:
+#     cip_crosswalk              CIP ↔ SHRS program ↔ SOC mapping
+#     award_level_labels         IPEDS award level code → label
+#     regional_fips_labels       FIPS → state abbreviation
+#
+#   RAW / CLEANED DATA:
+#     raw_completions            Raw API pull (institution-level)
+#     completions_clean          Cleaned + joined to crosswalk
+#
+#   AGGREGATED DATA (4 tiers):
+#     national_completions       National totals by program × degree × year
+#     state_completions          State-level totals
+#     pa_completions             Pennsylvania only
+#     regional_completions       PA + bordering states
+#     institution_completions    Institution-level (for competitor analysis)
+#
+#   ANALYSIS OUTPUTS:
+#     national_total             National totals (all degree levels combined)
+#     growth_summary             CAGR and growth rates by program
+#     pa_vs_national             PA share of national production
+#     projected_completions      5-year linear projections by degree level
+#     supply_demand              Spigot vs BLS openings gap analysis
+#
+#   CONSTANTS:
+#     PA_FIPS                    Pennsylvania FIPS code (42)
+#     REGIONAL_FIPS              PA + bordering state FIPS codes
+#     target_cips                CIP codes we track
+#     YEAR_START / YEAR_END      Data range
+# ═══════════════════════════════════════════════════════════════════════════
+
+cat("\n═══ IPEDS SPIGOT ANALYSIS: OUTPUT REGISTRY ═══\n")
+cat("National completions:", nrow(national_completions), "rows\n")
+cat("State completions:", nrow(state_completions), "rows\n")
+cat("PA completions:", nrow(pa_completions), "rows\n")
+cat("Regional completions:", nrow(regional_completions), "rows\n")
+cat("Institution completions:", nrow(institution_completions), "rows\n")
+cat("Projected completions:", nrow(projected_completions), "rows\n")
+cat("Supply-demand gap:", nrow(supply_demand), "rows\n")
+cat("Years:", YEAR_START, "to", YEAR_END, "+ 5yr projection\n")
+cat("═══════════════════════════════════════════════\n")
+```
+
+---
+
+# Appendix: Data Sources & Methodology
+
+**Data Source:**
+
+- IPEDS Completions by 6-digit CIP code, accessed via the Urban Institute
+  Education Data Portal API (`educationdata` R package)
+- Award levels: Bachelor's (5), Master's (7), Doctorate — Professional
+  Practice (17), Doctorate — Research (18), Doctorate — Other (19)
+
+**CIP Code Mappings:**
+
+| SHRS Program | CIP Code(s) | CIP Title |
+|---|---|---|
+| SLP | 51.0203, 51.0204 | Speech-Language Pathology; Combined SLP/AuD |
+| AuD | 51.0202, 51.0204 | Audiology; Combined SLP/AuD |
+| DN  | 51.3101, 51.3104 | Dietetics/Dietitian; Dietitian Assistant |
+| AT  | 51.0913          | Athletic Training/Trainer |
+| SS  | 26.0908, 31.0505 | Exercise Physiology; Kinesiology & Exercise Science |
+| OTD | 51.2306          | Occupational Therapy/Therapist |
+| DPT | 51.2308          | Physical Therapy/Therapist |
+| PAS | 51.0912          | Physician Assistant |
+| HIM | 51.0706, 51.0707 | Health Info/Medical Records Admin; Health Info Tech |
+
+**Projection Methodology:**
+
+- Simple linear trend (`lm(total_awards ~ year)`) per program × degree level
+- 95% confidence intervals from `predict(..., se.fit = TRUE)`
+- Projections floored at 0 (cannot produce negative graduates)
+- This is a simple extrapolation, not a structural model
+
+**Supply-Demand Gap:**
+
+- "Spigot" = latest year IPEDS completions (annual graduates produced)
+- "Holes" = BLS annual openings from the 2024–2034 projection cycle
+- Gap ratio = annual graduates / annual openings
+- Ratio > 1.0 suggests supply may exceed demand; < 1.0 suggests shortage
+
+**Known Limitations:**
+
+1. Urban Institute API data may lag IPEDS by 1–2 years
+2. CIP 51.0204 (combined SLP/AuD) counts toward both SLP and AuD — this
+   creates some double-counting. Adjust if needed for precision.
+3. IPEDS counts degrees, not individuals entering the workforce (some
+   graduates leave the state, change fields, or pursue further education)
+4. BLS openings are national; PA-specific demand requires state projections
+   (see projectionscentral.org for state-level BLS data)
+5. Kinesiology/Exercise Science (CIP 31.0505) is a broad field — not all
+   graduates become Exercise Physiologists
