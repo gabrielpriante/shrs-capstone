@@ -1,0 +1,426 @@
+---
+title: "SHRS Competitor Analysis - Competitor Identification Report"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r comp-rpt-setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+# 0 - About This Report
+
+This report reads the CSVs produced by `competitor_01_pull.R` and presents
+the competitor landscape for all 9 SHRS programs. No API calls are made here.
+
+```{r comp-rpt-packages}
+library(tidyverse)
+library(scales)
+library(kableExtra)
+```
+
+```{r comp-rpt-load}
+# -- EDIT THIS PATH if your CSVs are in a different location --
+DATA_DIR <- "competitor_data"
+
+tier1          <- read_csv(file.path(DATA_DIR, "tier1_statewide.csv"), show_col_types = FALSE)
+tier2          <- read_csv(file.path(DATA_DIR, "tier2_regional.csv"), show_col_types = FALSE)
+tier1_summary  <- read_csv(file.path(DATA_DIR, "tier1_summary.csv"), show_col_types = FALSE)
+tier2_summary  <- read_csv(file.path(DATA_DIR, "tier2_summary.csv"), show_col_types = FALSE)
+master_roster  <- read_csv(file.path(DATA_DIR, "master_roster.csv"), show_col_types = FALSE)
+pitt_rank      <- read_csv(file.path(DATA_DIR, "pitt_rank.csv"), show_col_types = FALSE)
+cip_crosswalk  <- read_csv(file.path(DATA_DIR, "cip_crosswalk.csv"), show_col_types = FALSE)
+
+PITT_UNITID <- 215293L
+latest_year <- max(tier1$year, na.rm = TRUE)
+if (is.na(latest_year) || is.infinite(latest_year)) {
+  latest_year <- 2022
+}
+
+cat("Data loaded from:", DATA_DIR, "\n")
+cat("Programs:", paste(sort(unique(tier1$shrs_program)), collapse = ", "), "\n")
+cat("Tier 1 rows:", nrow(tier1), "| Tier 2 rows:", nrow(tier2), "\n")
+```
+
+---
+
+# 1 - Tier 1: Statewide Competition (All PA)
+
+How many PA institutions compete with Pitt in each program, and what is
+Pitt's share of statewide graduate production?
+
+## 1.1 Summary
+
+```{r comp-rpt-t1-summary}
+tier1_summary |>
+  arrange(desc(total_pa_graduates)) |>
+  select(
+    Program          = shrs_program,
+    Dept             = shrs_dept,
+    `PA Schools`     = n_competitors,
+    `Competitors`    = n_competitors_excl,
+    `Total PA Grads` = total_pa_graduates,
+    `Pitt Grads`     = pitt_graduates,
+    `Pitt Share (%)`  = pitt_share_pct
+  ) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 1.2 Pitt's Share Visualization
+
+```{r comp-rpt-t1-share, fig.height=5}
+tier1_summary |>
+  mutate(other_graduates = total_pa_graduates - pitt_graduates) |>
+  select(shrs_program, Pitt = pitt_graduates, `Other PA` = other_graduates) |>
+  pivot_longer(-shrs_program, names_to = "source", values_to = "grads") |>
+  ggplot(aes(x = reorder(shrs_program, grads, sum), y = grads, fill = source)) +
+  geom_col(width = 0.6) +
+  coord_flip() +
+  scale_y_continuous(labels = comma) +
+  scale_fill_manual(values = c("Pitt" = "#003594", "Other PA" = "#CCCCCC")) +
+  labs(
+    title = "Pitt vs. All Other PA Institutions: Graduate Production",
+    subtitle = paste0("IPEDS Completions, ", latest_year),
+    x = NULL, y = "Total Degrees Awarded", fill = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+## 1.3 Pitt's Rank in PA
+
+```{r comp-rpt-pitt-rank}
+pitt_rank |>
+  arrange(rank) |>
+  select(
+    Program     = shrs_program,
+    `Pitt Awards` = total_awards,
+    `Rank in PA`  = rank,
+    `of N Schools` = n_schools,
+    Percentile    = percentile
+  ) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 1.4 Full Competitor Lists by Program
+
+```{r comp-rpt-t1-lists, results='asis', fig.height=6}
+for (prog in sort(unique(tier1$shrs_program))) {
+
+  cat(paste0("\n### ", prog, "\n\n"))
+
+  prog_data <- tier1 |>
+    filter(shrs_program == prog) |>
+    mutate(is_pitt = unitid == PITT_UNITID)
+
+  # Table
+  prog_data |>
+    mutate(Institution = if_else(is_pitt, paste0("**", inst_name, " (PITT)**"), inst_name)) |>
+    select(Institution, City = city, Awards = total_awards, `Degree Levels` = degree_levels) |>
+    kable(format.args = list(big.mark = ",")) |>
+    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+    print()
+
+  # Chart
+  p <- prog_data |>
+    ggplot(aes(x = reorder(inst_name, total_awards), y = total_awards, fill = is_pitt)) +
+    geom_col(width = 0.6) +
+    coord_flip() +
+    scale_fill_manual(values = c("FALSE" = "#CCCCCC", "TRUE" = "#003594"),
+                      labels = c("Competitor", "Pitt"), guide = "none") +
+    scale_y_continuous(labels = comma) +
+    labs(title = paste0(prog, ": PA Competitor Landscape"),
+         x = NULL, y = "Degrees Awarded") +
+    theme_minimal(base_size = 11)
+  print(p)
+
+  cat("\n\n")
+}
+```
+
+---
+
+# 2 - Tier 2: Regional Competition (Pittsburgh-Erie Corridor)
+
+The Pittsburgh-Erie corridor covers 17 counties in western and northwestern PA.
+These are the institutions a local prospective student would most directly
+weigh against Pitt.
+
+## 2.1 Summary
+
+```{r comp-rpt-t2-summary}
+tier2_summary |>
+  arrange(desc(total_grads)) |>
+  select(
+    Program              = shrs_program,
+    `Regional Competitors` = n_competitors,
+    `Regional Grads`       = total_grads,
+    `Pitt Grads`           = pitt_grads,
+    `Pitt Share (%)`       = pitt_share_pct
+  ) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 2.2 Regional Share Visualization
+
+```{r comp-rpt-t2-share, fig.height=5}
+tier2_summary |>
+  mutate(other_grads = total_grads - pitt_grads) |>
+  select(shrs_program, Pitt = pitt_grads, `Other Regional` = other_grads) |>
+  pivot_longer(-shrs_program, names_to = "source", values_to = "grads") |>
+  ggplot(aes(x = reorder(shrs_program, grads, sum), y = grads, fill = source)) +
+  geom_col(width = 0.6) +
+  coord_flip() +
+  scale_y_continuous(labels = comma) +
+  scale_fill_manual(values = c("Pitt" = "#003594", "Other Regional" = "#FDAE61")) +
+  labs(
+    title = "Pitt vs. Regional Competitors: Graduate Production",
+    subtitle = "Pittsburgh-Erie Corridor (17 counties)",
+    x = NULL, y = "Total Degrees Awarded", fill = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+## 2.3 Regional Competitor Lists by Program
+
+```{r comp-rpt-t2-lists, results='asis', fig.height=5}
+for (prog in sort(unique(tier2$shrs_program))) {
+
+  cat(paste0("\n### ", prog, "\n\n"))
+
+  prog_data <- tier2 |>
+    filter(shrs_program == prog) |>
+    mutate(is_pitt = unitid == PITT_UNITID)
+
+  prog_data |>
+    mutate(Institution = if_else(is_pitt, paste0("**", inst_name, " (PITT)**"), inst_name)) |>
+    select(Institution, City = city, Region = region, Awards = total_awards,
+           `Degree Levels` = degree_levels) |>
+    kable(format.args = list(big.mark = ",")) |>
+    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+    print()
+
+  cat("\n")
+}
+```
+
+---
+
+# 3 - Cross-Program Analysis
+
+## 3.1 Most Frequent Competitors
+
+Which PA institutions compete with Pitt across the most programs?
+
+```{r comp-rpt-frequent}
+master_roster |>
+  filter(!is_pitt) |>
+  group_by(unitid, inst_name, city) |>
+  summarise(
+    n_programs   = n(),
+    programs     = paste(sort(unique(shrs_program)), collapse = ", "),
+    total_awards = sum(total_awards, na.rm = TRUE),
+    .groups      = "drop"
+  ) |>
+  arrange(desc(n_programs), desc(total_awards)) |>
+  head(20) |>
+  select(
+    Institution  = inst_name,
+    City         = city,
+    `# Programs` = n_programs,
+    Programs     = programs,
+    `Total Awards` = total_awards
+  ) |>
+  kable(format.args = list(big.mark = ",")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 3.2 Competition Intensity by Program
+
+How crowded is each program's competitive landscape?
+
+```{r comp-rpt-intensity, fig.height=5}
+tier1_summary |>
+  ggplot(aes(x = reorder(shrs_program, n_competitors),
+             y = n_competitors, fill = shrs_dept)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = n_competitors), hjust = -0.2, size = 4) +
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Number of PA Competitors by SHRS Program",
+    subtitle = "Includes all institutions awarding degrees in matching CIP codes",
+    x = NULL, y = "Number of PA Institutions", fill = "Department"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+## 3.3 Pitt's Position: Percentile by Program
+
+```{r comp-rpt-percentile, fig.height=5}
+pitt_rank |>
+  ggplot(aes(x = reorder(shrs_program, percentile), y = percentile,
+             fill = percentile)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(percentile, "%")), hjust = -0.1, size = 4) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50") +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 110)) +
+  scale_fill_gradient2(low = "#d7191c", mid = "#fee08b", high = "#1a9850",
+                       midpoint = 50, guide = "none") +
+  labs(
+    title = "Pitt's Percentile Rank in PA by Program",
+    subtitle = "Based on completions volume. 100% = largest producer in PA.",
+    x = NULL, y = "Percentile"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+---
+
+# 4 - Tier 1 vs. Tier 2 Comparison
+
+How does the competitive picture change when we zoom from statewide to regional?
+
+```{r comp-rpt-tier-compare}
+comparison <- tier1_summary |>
+  select(shrs_program,
+         t1_schools = n_competitors,
+         t1_grads   = total_pa_graduates,
+         t1_pitt    = pitt_share_pct) |>
+  left_join(
+    tier2_summary |>
+      select(shrs_program,
+             t2_schools = n_competitors,
+             t2_grads   = total_grads,
+             t2_pitt    = pitt_share_pct),
+    by = "shrs_program"
+  ) |>
+  mutate(
+    share_increase = round(t2_pitt - t1_pitt, 1)
+  )
+
+comparison |>
+  select(
+    Program               = shrs_program,
+    `PA Schools`          = t1_schools,
+    `Regional Schools`    = t2_schools,
+    `Pitt Share PA (%)`   = t1_pitt,
+    `Pitt Share Reg (%)` = t2_pitt,
+    `Share Increase (pp)` = share_increase
+  ) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r comp-rpt-tier-compare-chart, fig.height=5}
+comparison |>
+  select(shrs_program, `Statewide` = t1_pitt, `Regional` = t2_pitt) |>
+  pivot_longer(-shrs_program, names_to = "scope", values_to = "pitt_share") |>
+  ggplot(aes(x = reorder(shrs_program, pitt_share, max),
+             y = pitt_share, fill = scope)) +
+  geom_col(position = "dodge", width = 0.6) +
+  coord_flip() +
+  scale_fill_manual(values = c("Statewide" = "#2c7bb6", "Regional" = "#003594")) +
+  labs(
+    title = "Pitt's Market Share: Statewide vs. Regional",
+    subtitle = "Share increases when zooming to the Pittsburgh-Erie corridor",
+    x = NULL, y = "Pitt Share of Graduates (%)", fill = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+---
+
+# 5 - Key Takeaways
+
+```{r comp-rpt-takeaways, results='asis'}
+cat("## Headline Findings\n\n")
+
+# Strongest positions
+strong <- pitt_rank |> filter(percentile >= 75) |> arrange(desc(percentile))
+if (nrow(strong) > 0) {
+  cat("**Strongest competitive positions** (75th+ percentile in PA):\n\n")
+  for (i in seq_len(nrow(strong))) {
+    cat(paste0("- **", strong$shrs_program[i], "**: Rank ",
+               strong$rank[i], " of ", strong$n_schools[i],
+               " (", strong$percentile[i], "th percentile, ",
+               strong$total_awards[i], " awards)\n"))
+  }
+  cat("\n")
+}
+
+# Weaker positions
+weak <- pitt_rank |> filter(percentile < 50) |> arrange(percentile)
+if (nrow(weak) > 0) {
+  cat("**Areas for attention** (below 50th percentile in PA):\n\n")
+  for (i in seq_len(nrow(weak))) {
+    cat(paste0("- **", weak$shrs_program[i], "**: Rank ",
+               weak$rank[i], " of ", weak$n_schools[i],
+               " (", weak$percentile[i], "th percentile, ",
+               weak$total_awards[i], " awards)\n"))
+  }
+  cat("\n")
+}
+
+# Missing from ranking
+missing <- setdiff(sort(unique(tier1$shrs_program)), pitt_rank$shrs_program)
+if (length(missing) > 0) {
+  cat("**Programs where Pitt shows 0 IPEDS completions**: ",
+      paste(missing, collapse = ", "),
+      ". These may be coded under different CIP codes in IPEDS or may not currently be awarding degrees.\n\n")
+}
+
+# Most competitive markets
+crowded <- tier1_summary |> arrange(desc(n_competitors)) |> head(3)
+cat("**Most crowded PA markets**: ",
+    paste0(crowded$shrs_program, " (", crowded$n_competitors, " schools)"),
+    sep = "", collapse = ", ")
+cat("\n\n")
+
+# Regional dominance
+reg_strong <- tier2_summary |> filter(pitt_share_pct >= 30) |> arrange(desc(pitt_share_pct))
+if (nrow(reg_strong) > 0) {
+  cat("**Regional dominance** (30%+ share in Pittsburgh-Erie corridor):\n\n")
+  for (i in seq_len(nrow(reg_strong))) {
+    cat(paste0("- **", reg_strong$shrs_program[i], "**: ",
+               reg_strong$pitt_share_pct[i], "% regional share\n"))
+  }
+}
+```
+
+---
+
+# Appendix
+
+**Data Source**: IPEDS Completions by 6-digit CIP code, accessed via Urban
+Institute Education Data Portal API. Institution directory from the same source.
+
+**Tier Definitions**:
+
+- Tier 1 (Statewide): All PA institutions with non-zero completions in target CIP codes
+- Tier 2 (Regional): Tier 1 subset in 17 counties from Pittsburgh metro through Erie
+- Tier 3 (National): U.S. News top programs (not yet populated)
+
+**Latest IPEDS Year**: `r latest_year`
+
+**Note on AT and DN**: Pitt may show 0 completions for Athletic Training and
+Dietetics/Nutrition if these programs are coded under different CIP codes in
+Pitt's IPEDS reporting. Verify with SHRS registrar.

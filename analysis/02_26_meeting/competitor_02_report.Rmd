@@ -1,0 +1,339 @@
+---
+title: "SHRS Competitor Analysis - Tuition Comparison Report"
+author: "SHRS MQE Capstone Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r comp-tui-setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+# 0 - About This Report
+
+This report reads the CSVs produced by `competitor_02_tuition_pull.R` and
+presents Pitt's tuition positioning against PA competitors for all 9 SHRS
+programs. No API calls are made here.
+
+```{r comp-tui-load}
+library(tidyverse)
+library(scales)
+library(kableExtra)
+
+DATA_DIR <- "competitor_data"
+
+tier1_tuition      <- read_csv(file.path(DATA_DIR, "tier1_with_tuition.csv"), show_col_types = FALSE)
+tier2_tuition      <- read_csv(file.path(DATA_DIR, "tier2_with_tuition.csv"), show_col_types = FALSE)
+tuition_comparison <- read_csv(file.path(DATA_DIR, "tuition_comparison.csv"), show_col_types = FALSE)
+tuition_latest     <- read_csv(file.path(DATA_DIR, "tuition_latest.csv"), show_col_types = FALSE)
+
+PITT_UNITID <- 215293L
+
+pitt_tuition <- tuition_latest |> filter(unitid == PITT_UNITID)
+pitt_in  <- pitt_tuition$tuition_in_state[1]
+pitt_out <- pitt_tuition$tuition_out_of_state[1]
+
+cat("Pitt graduate tuition (in-state):", dollar(pitt_in), "\n")
+cat("Pitt graduate tuition (out-of-state):", dollar(pitt_out), "\n")
+```
+
+---
+
+# 1 - Pitt vs. PA Competitors: Summary
+
+How does Pitt's graduate tuition compare to the average and median of
+competitors for each program?
+
+```{r comp-tui-summary-table}
+tuition_comparison |>
+  arrange(desc(pitt_vs_avg_in)) |>
+  mutate(
+    pitt_in_state     = dollar(pitt_in_state),
+    pitt_out_of_state = dollar(pitt_out_of_state),
+    avg_in_state      = dollar(avg_in_state),
+    med_in_state      = dollar(med_in_state),
+    min_in_state      = dollar(min_in_state),
+    max_in_state      = dollar(max_in_state),
+    pitt_vs_avg_in    = dollar(pitt_vs_avg_in)
+  ) |>
+  select(
+    Program            = shrs_program,
+    `Pitt In-State`    = pitt_in_state,
+    `Avg Competitor`   = avg_in_state,
+    `Median Comp`      = med_in_state,
+    `Min`              = min_in_state,
+    `Max`              = max_in_state,
+    `Pitt vs Avg`      = pitt_vs_avg_in
+  ) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r comp-tui-summary-chart, fig.height=6}
+tuition_comparison |>
+  filter(!is.na(pitt_in_state)) |>
+  select(shrs_program, Pitt = pitt_in_state, `Competitor Avg` = avg_in_state,
+         `Competitor Med` = med_in_state) |>
+  pivot_longer(-shrs_program, names_to = "measure", values_to = "tuition") |>
+  ggplot(aes(x = reorder(shrs_program, tuition, max),
+             y = tuition, fill = measure)) +
+  geom_col(position = "dodge", width = 0.6) +
+  coord_flip() +
+  scale_y_continuous(labels = dollar) +
+  scale_fill_manual(values = c(
+    "Pitt" = "#003594",
+    "Competitor Avg" = "#CCCCCC",
+    "Competitor Med" = "#999999"
+  )) +
+  labs(
+    title = "Pitt Graduate Tuition vs. PA Competitors (In-State)",
+    subtitle = "IPEDS Academic Year Tuition, 2021",
+    x = NULL, y = "Graduate Tuition & Fees (Full-Time)", fill = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+---
+
+# 2 - Tuition Range by Program
+
+Where does Pitt fall within the full range of competitor tuition?
+
+```{r comp-tui-range, fig.height=7}
+tier1_tuition |>
+  filter(!is.na(tuition_in_state)) |>
+  ggplot(aes(x = reorder(shrs_program, tuition_in_state, median),
+             y = tuition_in_state)) +
+  geom_boxplot(fill = "#E8E8E8", outlier.shape = NA, width = 0.5) +
+  geom_jitter(aes(color = is_pitt, size = is_pitt),
+              width = 0.15, alpha = 0.7) +
+  scale_y_continuous(labels = dollar) +
+  scale_color_manual(values = c("FALSE" = "#999999", "TRUE" = "#003594"),
+                     labels = c("Competitor", "Pitt")) +
+  scale_size_manual(values = c("FALSE" = 2, "TRUE" = 5),
+                    labels = c("Competitor", "Pitt")) +
+  coord_flip() +
+  labs(
+    title = "Graduate Tuition Distribution by SHRS Program",
+    subtitle = "Pitt highlighted in blue. Box = IQR of PA competitors.",
+    x = NULL, y = "In-State Graduate Tuition & Fees",
+    color = NULL, size = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+---
+
+# 3 - Detailed Tuition by Program
+
+```{r comp-tui-detail, results='asis', fig.height=5}
+for (prog in sort(unique(tier1_tuition$shrs_program))) {
+
+  prog_data <- tier1_tuition |>
+    filter(shrs_program == prog, !is.na(tuition_in_state)) |>
+    arrange(tuition_in_state)
+
+  if (nrow(prog_data) == 0) next
+
+  cat(paste0("\n## ", prog, "\n\n"))
+
+  # Table
+  prog_data |>
+    mutate(
+      Institution = if_else(is_pitt, paste0("**", inst_name, " (PITT)**"), inst_name),
+      tuition_in_state = dollar(tuition_in_state),
+      tuition_out_of_state = dollar(tuition_out_of_state)
+    ) |>
+    select(
+      Institution,
+      City = city,
+      `In-State` = tuition_in_state,
+      `Out-of-State` = tuition_out_of_state,
+      `Awards` = total_awards
+    ) |>
+    kable() |>
+    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+    print()
+
+  # Chart
+  p <- prog_data |>
+    ggplot(aes(x = reorder(inst_name, tuition_in_state),
+               y = tuition_in_state, fill = is_pitt)) +
+    geom_col(width = 0.6) +
+    coord_flip() +
+    scale_y_continuous(labels = dollar) +
+    scale_fill_manual(values = c("FALSE" = "#CCCCCC", "TRUE" = "#003594"),
+                      guide = "none") +
+    labs(title = paste0(prog, ": In-State Graduate Tuition"),
+         x = NULL, y = "Tuition & Fees") +
+    theme_minimal(base_size = 11)
+  print(p)
+
+  cat("\n\n")
+}
+```
+
+---
+
+# 4 - Regional Tuition Comparison (Pittsburgh-Erie)
+
+How does Pitt compare to just the local competitors?
+
+```{r comp-tui-regional, fig.height=6}
+tier2_tuition |>
+  filter(!is.na(tuition_in_state)) |>
+  ggplot(aes(x = reorder(inst_name, tuition_in_state),
+             y = tuition_in_state, fill = is_pitt)) +
+  geom_col(width = 0.6) +
+  coord_flip() +
+  facet_wrap(~ shrs_program, scales = "free", ncol = 2) +
+  scale_y_continuous(labels = dollar) +
+  scale_fill_manual(values = c("FALSE" = "#FDAE61", "TRUE" = "#003594"),
+                    labels = c("Regional Competitor", "Pitt")) +
+  labs(
+    title = "Regional Tuition Comparison: Pitt vs Pittsburgh-Erie Corridor",
+    subtitle = "Graduate in-state tuition & fees",
+    x = NULL, y = "Tuition & Fees", fill = NULL
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(legend.position = "bottom",
+        axis.text.y = element_text(size = 7))
+```
+
+---
+
+# 5 - In-State vs Out-of-State Spread
+
+How much more do out-of-state students pay? This matters for understanding
+cost competitiveness for students crossing state lines.
+
+```{r comp-tui-spread, fig.height=6}
+tier1_tuition |>
+  filter(!is.na(tuition_in_state), !is.na(tuition_out_of_state)) |>
+  mutate(spread = tuition_out_of_state - tuition_in_state) |>
+  ggplot(aes(x = tuition_in_state, y = tuition_out_of_state,
+             color = is_pitt, size = is_pitt)) +
+  geom_point(alpha = 0.7) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+  scale_x_continuous(labels = dollar) +
+  scale_y_continuous(labels = dollar) +
+  scale_color_manual(values = c("FALSE" = "#999999", "TRUE" = "#003594"),
+                     labels = c("Competitor", "Pitt")) +
+  scale_size_manual(values = c("FALSE" = 2, "TRUE" = 5),
+                    labels = c("Competitor", "Pitt")) +
+  labs(
+    title = "In-State vs Out-of-State Graduate Tuition",
+    subtitle = "Points above the dashed line charge more for out-of-state. Pitt in blue.",
+    x = "In-State Tuition", y = "Out-of-State Tuition",
+    color = NULL, size = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+```{r comp-tui-spread-table}
+tier1_tuition |>
+  filter(!is.na(tuition_in_state), !is.na(tuition_out_of_state)) |>
+  mutate(
+    spread     = tuition_out_of_state - tuition_in_state,
+    spread_pct = round(spread / tuition_in_state * 100, 0)
+  ) |>
+  group_by(shrs_program) |>
+  summarise(
+    pitt_spread     = dollar(max(spread[is_pitt], na.rm = TRUE)),
+    pitt_spread_pct = paste0(max(spread_pct[is_pitt], na.rm = TRUE), "%"),
+    avg_spread      = dollar(round(mean(spread[!is_pitt], na.rm = TRUE))),
+    avg_spread_pct  = paste0(round(mean(spread_pct[!is_pitt], na.rm = TRUE)), "%"),
+    .groups = "drop"
+  ) |>
+  select(
+    Program           = shrs_program,
+    `Pitt Spread`     = pitt_spread,
+    `Pitt Spread %`   = pitt_spread_pct,
+    `Avg Comp Spread`  = avg_spread,
+    `Avg Comp Spread %` = avg_spread_pct
+  ) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 6 - Key Findings
+
+```{r comp-tui-findings, results='asis'}
+# Programs where Pitt is more expensive than average
+expensive <- tuition_comparison |>
+  filter(!is.na(pitt_vs_avg_in), pitt_vs_avg_in > 0) |>
+  arrange(desc(pitt_vs_avg_in))
+
+if (nrow(expensive) > 0) {
+  cat("## Pitt is above average in-state tuition for:\n\n")
+  for (i in seq_len(nrow(expensive))) {
+    cat(paste0("- **", expensive$shrs_program[i], "**: ",
+               dollar(expensive$pitt_in_state[i]),
+               " vs ", dollar(expensive$avg_in_state[i]),
+               " avg (+", dollar(expensive$pitt_vs_avg_in[i]), ")\n"))
+  }
+  cat("\n")
+}
+
+# Programs where Pitt is cheaper
+cheaper <- tuition_comparison |>
+  filter(!is.na(pitt_vs_avg_in), pitt_vs_avg_in < 0) |>
+  arrange(pitt_vs_avg_in)
+
+if (nrow(cheaper) > 0) {
+  cat("## Pitt is below average in-state tuition for:\n\n")
+  for (i in seq_len(nrow(cheaper))) {
+    cat(paste0("- **", cheaper$shrs_program[i], "**: ",
+               dollar(cheaper$pitt_in_state[i]),
+               " vs ", dollar(cheaper$avg_in_state[i]),
+               " avg (", dollar(cheaper$pitt_vs_avg_in[i]), ")\n"))
+  }
+  cat("\n")
+}
+
+# Programs with no Pitt tuition data
+missing <- tuition_comparison |> filter(is.na(pitt_in_state))
+if (nrow(missing) > 0) {
+  cat("## No Pitt tuition comparison available for: ",
+      paste(missing$shrs_program, collapse = ", "),
+      "\n\n(Pitt shows 0 IPEDS completions in these CIP codes.)\n\n")
+}
+
+cat("## Context\n\n")
+cat(paste0("- IPEDS tuition is **institution-level**, not program-specific. ",
+           "Actual program costs may differ due to differential tuition, fees, or clinical charges.\n"))
+cat(paste0("- Data is from **academic year 2021** (most recent available in IPEDS).\n"))
+cat(paste0("- Pitt graduate in-state: **", dollar(pitt_in), "** | ",
+           "Out-of-state: **", dollar(pitt_out), "**\n"))
+```
+
+---
+
+# Appendix
+
+**Data Source**: IPEDS Academic Year Tuition via Urban Institute Education Data Portal API.
+
+**Tuition Type Codes**: 2 = in-district, 3 = in-state, 4 = out-of-state.
+We use type 3 (in-state) and type 4 (out-of-state) for graduate level (level_of_study = 2).
+
+**Important caveat**: IPEDS reports institution-level tuition, not program-specific.
+Many health professions programs charge differential tuition above the base rate.
+The numbers here represent the institutional baseline. Actual program costs for
+clinical doctorates (DPT, OTD, AuD) and professional programs (PAS) are typically
+higher than the institutional rate shown.
