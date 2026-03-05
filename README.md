@@ -309,10 +309,10 @@ This project was conducted as part of the MQE capstone requirement at the Univer
 
 ---
 
-*Last Updated: January 2026*
+*Last Updated: March 2026*
 
 **Repository Purpose**: This is a methodological and analytical framework repository, not a data repository. All analyses reference external data sources due to confidentiality requirements.
-Prototype: https://gabrielpriante.github.io/shrs-capstone/analysis/market_v3/projections_analysis/projections_dashboard.html
+Prototype: https://gabrielpriante.github.io/shrs-capstone/analysis/market_v3/projections_analysis/index.html
 
 
 
